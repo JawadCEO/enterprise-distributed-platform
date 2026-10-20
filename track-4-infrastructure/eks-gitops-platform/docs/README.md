@@ -1,6 +1,16 @@
-# eks-gitops-platform: Understanding and Plan
+# eks-gitops-platform
 
 **Status:** draft for discussion. No code yet.
+
+## Documents
+
+| Document |
+|---|
+| [Problem statement, goals, users, non-goals](requirements/problem-statement.md) |
+| [Functional requirements](requirements/functional-requirements.md) |
+| [Non-functional requirements and disaster recovery](requirements/non-functional-requirements.md) |
+| [Data and flows: what is received, processed, and returned](requirements/data.md) |
+| [Decisions still needed, with working assumptions](requirements/open-questions.md) |
 
 ## Brief
 
@@ -40,23 +50,23 @@ This project has components, not microservices.
 
 ## Phase plan
 
-The 9-phase framework is written for applications, so several phases are adapted.
+The 9-phase framework is written for applications. This project has no database or message bus, so its phases follow how a platform is actually built: design first, then everything that can run for free on a local cluster, and only then AWS, in short sessions.
 
-| Phase | Focus for this project |
-|---|---|
-| 0 | Requirements, non-goals, ADR on GitOps toolchain (ArgoCD against Flux) |
-| 1 | Adapted: no database. Covers Terraform state and locking, Git repository layout as source of truth, secrets management |
-| 2 | Adapted: no message bus. Covers the delivery flow: sync ordering, app-of-apps, promotion between environments |
-| 3 | Adapted: platform add-ons and the tenancy model |
-| 4 | IRSA, GitHub OIDC, private endpoint access, Gatekeeper policies, network policy |
-| 5 | Cluster and add-on monitoring, alerting, AWS cost model and tagging |
-| 6 | Policy tests, provisioning-time measurement, destroy-and-rebuild recovery drill |
-| 7 | Cluster and add-on upgrades, node scaling, rollback of a bad sync |
-| 8 | ADRs, runbook, results write-up |
+| Phase | Focus for this project | Where it runs |
+|---|---|---|
+| 0 | Requirements and decisions: open questions answered, ADRs on ArgoCD against Flux and Terraform against OpenTofu, budget agreed | Docs |
+| 1 | Platform design: Git repository layout, app-of-apps structure, sync ordering, environments and promotion, secrets approach, tenancy model, policy set, Terraform module and state design | Docs |
+| 2 | GitOps layer locally: ArgoCD bootstrap, app-of-apps, add-ons that work without AWS (cert-manager, Prometheus and Grafana, Gatekeeper), drift revert | Local cluster |
+| 3 | Tenancy and policy locally: tenant onboarding by pull request, quotas, network policies, ArgoCD projects, Gatekeeper rules with CI tests | Local cluster |
+| 4 | AWS foundation: billing alarm first, state backend, VPC, private EKS, IAM roles for service accounts, Route 53 zone, CI through GitHub OIDC | AWS session |
+| 5 | Platform on AWS: bootstrap through Systems Manager, AWS-integrated add-ons (load balancer controller, ExternalDNS, cert-manager DNS challenge, autoscaler, Secrets Manager sync), one tenant project live over HTTPS | AWS session |
+| 6 | Observability and cost: cluster and per-tenant dashboards, alerts, log store, tagging check, spend report | Local, then AWS |
+| 7 | Verification and day-2 operations: timed provisioning, destroy-and-rebuild drill, drift tests, credential scan, cluster and add-on upgrade, bad-sync rollback, node scaling, dev-to-prod promotion | AWS session |
+| 8 | ADRs, runbooks, results write-up | Docs |
 
 ## Laptop fit (16GB)
 
-The GitOps layer (ArgoCD, add-ons, tenancy, policies) can be developed on a local Kubernetes cluster in about 4GB. The AWS parts cannot run locally at all.
+The GitOps layer (ArgoCD, add-ons, tenancy, policies) can be developed on a local Kubernetes cluster in about 4GB. The local cluster needs a network plugin that enforces network policies (for example k3d, or kind with Calico), or the tenancy tests in Phase 3 prove nothing. The AWS parts cannot run locally at all.
 
 ## Risks and open questions
 
