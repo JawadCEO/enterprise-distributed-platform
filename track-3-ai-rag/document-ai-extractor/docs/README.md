@@ -1,6 +1,16 @@
-# document-ai-extractor: Understanding and Plan
+# document-ai-extractor
 
 **Status:** draft for discussion. No code yet.
+
+## Documents
+
+| Document |
+|---|
+| [Problem statement, goals, users, non-goals](requirements/problem-statement.md) |
+| [Functional requirements](requirements/functional-requirements.md) |
+| [Non-functional requirements and disaster recovery](requirements/non-functional-requirements.md) |
+| [Data and data flow: what we receive, how each stage processes it, what we give back](requirements/data.md) |
+| [Decisions still needed](requirements/open-questions.md) |
 
 ## Brief
 
@@ -40,21 +50,23 @@ A user uploads a PDF. The pipeline works through it in stages: store the file, t
 
 - MinIO: original PDFs, page images, OCR output
 - PostgreSQL: documents, pages, pipeline stage status, extracted entities with page and box, extraction schema versions
-- Vector index: text chunks and embeddings (Qdrant or pgvector, to be decided)
+- Vector index: text chunks and embeddings (pgvector, working assumption; see open questions)
 - Kafka: one topic per pipeline stage, plus retry and dead-letter topics
 
 ## Phase plan
 
+The project keeps the shared 9 phases. Phases 1, 3, 4, 6 and 7 are adapted to this project, as follows.
+
 | Phase | Focus for this project |
 |---|---|
-| 0 | Requirements, non-goals, extraction schema, ADR on layout-aware extraction pipelines |
-| 1 | Document, page, and entity schema, provenance model, vector store choice, key queries |
-| 2 | Stage topics, large-payload handling (pass references, not files), retries, poison documents |
-| 3 | Stage design, page-level parallelism, model loading, hybrid ranking |
-| 4 | Upload validation, malicious-file handling, access control |
-| 5 | Per-stage latency, extraction quality metrics, cost per document |
-| 6 | Extraction accuracy on a labelled sample, stage-kill drills, throughput benchmark |
-| 7 | Deployment, per-stage autoscaling on lag, model version rollout and re-indexing |
+| 0 | Requirements, non-goals, extraction schema v1, ADRs on layout-aware extraction and the vector store |
+| 1 | Data layer and evaluation set: document, page, block, entity, and chunk schema; provenance and coordinate model; key queries including hybrid search; DailyMed terms check, SPL ground truth, rasterised OCR pages, and about 50 labels with hand-marked boxes |
+| 2 | Messaging: stage topics, passing references instead of files, page fan-out and the join back to one document, outbox on upload, retries, dead letters, poison documents |
+| 3 | Stages: service boundaries, page-level parallelism, CPU pool for OCR, layout and embedding models sharing the 4GB GPU, extractor interface, hybrid ranking |
+| 4 | Security and licences: upload limits, sandboxed rendering of malicious PDFs, API key roles, source terms and model licences (LayoutLMv3 is non-commercial) |
+| 5 | Observability and cost: per-stage latency against the 45s budget, CPU and GPU use, extraction quality per model version, cost per 1,000 documents |
+| 6 | Verification: F1 and box accuracy on the evaluation set, OCR error rate, search relevance, stage-kill drills, throughput measured per stage and projected |
+| 7 | Release: Docker Compose for daily work, a local Kubernetes run with lag-based autoscaling (stages run in groups to fit 16GB), model version rollout with reprocessing and re-indexing |
 | 8 | ADRs, runbook, results write-up |
 
 ## Laptop fit (16GB)
