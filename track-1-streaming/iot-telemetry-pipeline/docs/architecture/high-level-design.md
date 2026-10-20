@@ -1,6 +1,6 @@
 # iot-telemetry-pipeline: High-Level Design
 
-**Status:** draft for discussion. Built on the recommendations in the Phase 0 document; any open decision answered differently there changes this design.
+**Status:** draft for discussion. Built on the recommendations in `../requirements/`; any open question answered differently there changes this design.
 
 ## 1. System overview
 

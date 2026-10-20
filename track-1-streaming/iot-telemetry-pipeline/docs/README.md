@@ -1,6 +1,18 @@
-# iot-telemetry-pipeline: Understanding and Plan
+# iot-telemetry-pipeline
 
 **Status:** draft for discussion. No code yet.
+
+## Documents
+
+| Document |
+|---|
+| [Problem statement, goals, users, non-goals](requirements/problem-statement.md) |
+| [Functional requirements](requirements/functional-requirements.md) |
+| [Non-functional requirements and disaster recovery](requirements/non-functional-requirements.md) |
+| [Data and flow: what we receive, process, store, and return](requirements/data.md) |
+| [Architecture decisions](requirements/architecture-decisions.md) |
+| [Decisions still needed](requirements/open-questions.md) |
+| [High-level design](architecture/high-level-design.md) |
 
 ## Brief
 
@@ -27,14 +39,15 @@ The legacy system asks each device for its status on a schedule. That wastes cap
 
 ## Preliminary shape (for discussion)
 
-**Services: 4, plus a simulator**
+**Services: 5, plus a simulator** (see the [high-level design](architecture/high-level-design.md#2-services))
 
 | Service | Responsibility |
 |---|---|
 | `ingestion-gateway` | Accepts device events, authenticates, rate limits (Redis), publishes to Kafka |
-| `telemetry-processor` | Validates, de-duplicates, enriches, writes telemetry and latest status |
-| `device-status-api` | Read API for current status and recent history |
-| `dlq-handler` | Classifies failed events, retries with backoff, supports manual replay |
+| `telemetry-processor` | Validates, de-duplicates, writes telemetry and latest status, runs the retry tiers |
+| `presence-monitor` | Marks devices offline when their heartbeat window passes |
+| `dead-letter-service` | Stores events that ran out of retries; supports inspection and replay |
+| `device-status-api` | Device registry; current status and history queries |
 | `device-simulator` | Test tool that generates device traffic, including bad and duplicate events |
 
 **Data stores**
@@ -47,15 +60,15 @@ The legacy system asks each device for its status on a schedule. That wastes cap
 
 | Phase | Focus for this project |
 |---|---|
-| 0 | Requirements, non-goals, ADR on streaming platform choice, delivery semantics |
-| 1 | Access patterns, telemetry partitioning scheme, latest-status upsert, key queries |
-| 2 | Topic layout, partition key and count, retry tiers, dead-letter and replay design |
-| 3 | Service boundaries, consumer concurrency, idempotency, rate limiter, circuit breakers |
-| 4 | Device authentication, service-to-service trust, audit logging |
-| 5 | Traces across the Kafka hop, consumer lag and golden-signal dashboards, cost model |
-| 6 | Integration tests, broker-kill and database-kill drills, load benchmark |
-| 7 | Kubernetes manifests, lag-based autoscaling, rollout and rollback |
-| 8 | ADRs, runbook, results write-up |
+| 0 | Requirements, ADRs 001 to 005, high-level design. Drafted; closes when the open questions are answered |
+| 1 | Data layer: access patterns, PostgreSQL schema (hourly telemetry partitions and drop job, status upsert guarded by sequence, status changes), Redis key design (status cache, last-seen sorted set, rate-limit counters), key queries, and whether a Redis duplicate check is needed |
+| 2 | Kafka: topic layout including `device.status-changed`, partition key and count for 3x peak, message format and schema registry, retry tiers, dead-letter and replay, cross-region topic replication design |
+| 3 | Services: API contracts for the three public interfaces, web stack and Java version, processor batch and commit strategy, consumer concurrency, rate-limit algorithm, presence-monitor scan, circuit breakers, and the `device-simulator` with its fault scenarios |
+| 4 | Security: device authentication, tenant isolation on every query, service-to-service trust and TLS, audit log for registry changes and replays |
+| 5 | Observability: one trace from gateway across Kafka to the database, freshness latency per hop against the 50ms budget, consumer lag, offline-detection lag, dead-letter rate, full-scale cost projection |
+| 6 | Testing and drills: integration tests, broker, database, Redis, and instance kills with reconciliation of every acknowledged event, laptop load benchmark with projection, two-region simulation (run on its own for memory) |
+| 7 | Kubernetes: manifests, lag-based autoscaling for the processor, rolling deploy and one-step rollback |
+| 8 | Write-up: final ADRs, runbook, results, multi-region design, and the documented cut-over from the legacy poller |
 
 ## Laptop fit (16GB)
 
