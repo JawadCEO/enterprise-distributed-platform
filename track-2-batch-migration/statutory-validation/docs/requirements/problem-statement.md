@@ -1,0 +1,76 @@
+# statutory-validation: Problem Statement
+
+**Status:** draft for discussion. Items marked **[assumption]** are working assumptions until confirmed. Items marked **[OQ-n]** follow the recommended answer to that question in [open-questions.md](open-questions.md).
+
+## 1. Context
+
+An employer with staff in a jurisdiction files a payroll tax return for that jurisdiction every quarter **[OQ-1]**. The return states how many people were employed, the wages paid, the part of those wages that is taxable, and the tax withheld, with one line per employee. The jurisdiction publishes the rules a return must satisfy: totals must add up, taxable wages are capped at an annual limit, tax must equal taxable wages times the rate in force, and so on. Caps and rates change every year, occasionally mid-year, and they differ by jurisdiction.
+
+A return for the third quarter of 2025 must be judged by the rules that applied to the third quarter of 2025, even if it is submitted, corrected or audited in 2027.
+
+## 2. Problem
+
+> Systems that prepare payroll returns need a fast, authoritative answer to one question: *does this filing satisfy the rules that applied to its jurisdiction and period, and if not, exactly which rules does it break?* Years later, an auditor must be able to prove which version of the rules produced that answer, and that the record of it has not been changed.
+
+Today these rules live inside application code. That causes four concrete failures:
+
+| Failure | Consequence |
+|---|---|
+| A rule change requires a software release | Rate changes that take effect on 1 January wait for the next release train, so filings are checked against stale rules |
+| Each system implements the same rule its own way | Two systems disagree about the same filing, and neither can show which is right |
+| The code that decided a past result no longer exists | An auditor's question "why did this filing pass in 2025?" cannot be answered with evidence |
+| Rule changes are not tested before release | A wrong rule is discovered when a real filing is wrongly accepted or rejected |
+
+## 3. Who is affected
+
+| Actor | What they need from the system |
+|---|---|
+| Submitting systems (payroll software, internal filing tools) | A synchronous pass or fail with every violation, fast enough to sit inside their own request path |
+| Rule authors (compliance analysts) | To change a rule, see it tested against known cases, and get it reviewed |
+| Rule approvers | To review a change and block it; never to approve their own change |
+| Auditors | To retrieve any past evaluation, see the exact rule version used, re-run it, and prove the log is intact |
+| Data subjects (employees named on filings) | Their personal data erased on a valid request, without breaking the audit trail |
+| Platform operators | To run, monitor and roll back the service and its rule sets independently |
+
+## 4. Proposed approach in one paragraph
+
+Rules become versioned data, not code. Each rule set covers one jurisdiction and filing type for a date range, lives in Git, is reviewed through a pull request, and is published only after an automated pipeline has compiled it and run it against expected-outcome cases **[OQ-5]**. Published rule sets are compiled once and held in memory by stateless validation instances, so evaluating a filing is a pure function of the filing and the rule set version. Every evaluation is recorded before the answer is returned, in an append-only, hash-chained log that holds hashes and references but never personal data.
+
+## 5. Goals and how we will know they are met
+
+| # | Goal | Success metric | Target |
+|---|---|---|---|
+| G1 | Fast enough to sit in a caller's request path | Server-side latency per validation at the reference workload **[OQ-4]** | p95 < 20ms, p99 < 80ms |
+| G2 | Handle filing-deadline peaks | Sustained validations per second at the reference workload | 5,000/sec (projected; see section 7) |
+| G3 | Same input, same answer, forever | Replayed evaluations whose result hash matches the original | 100% |
+| G4 | Every answer is on the record | Successful responses without a durable audit entry | 0 |
+| G5 | Any tampering is detectable | Modified, deleted, inserted or reordered audit records caught by verification | 100% |
+| G6 | Rule changes ship without code changes | Rule changes that needed an application release | 0 |
+| G7 | No untested rule reaches production | Published rule sets without a passing CI run and an independent approval | 0 |
+| G8 | Personal data stays erasable | Personal data values present in the audit log | 0 |
+
+## 6. Non-goals
+
+- A user interface for writing rules. Rules are files reviewed through pull requests **[OQ-5]**.
+- The legal accuracy of the rules. The rule set is synthetic and illustrative.
+- Submitting filings to any government system.
+- Correcting filings or managing cases for failed ones. The engine reports; it does not fix.
+- Rules written in natural language, or generated by a model.
+- Multi-region deployment **[assumption]**. One region, with high availability inside it.
+
+## 7. Constraints
+
+- **Stack is fixed:** Java, Spring Boot, Drools **[OQ-2]**, PostgreSQL, Redis, GitHub Actions, Kubernetes. Kafka is not in the stack.
+- **Hardware:** everything is built and load-tested on one 16GB laptop. Throughput and latency are measured there; figures for a production cluster are projections from those measurements and are labelled as such.
+- **Data is synthetic.** No real filings or real people.
+- **Audit completeness beats availability.** If an evaluation cannot be recorded, no result is returned (fail closed) **[OQ-3]**.
+
+## 8. Risks
+
+| Risk | Why it matters | Mitigation |
+|---|---|---|
+| Rule interaction in Drools makes results order-dependent | Breaks determinism (G3) | Rules only read facts and emit violations; no fact changes, no chaining; output sorted **[OQ-2]** |
+| The audit write sits in the request path | Threatens the 20ms target (G1) | One small outbox insert per request, batched commits; hash chaining done later by a single writer **[OQ-3]** |
+| A hash chain can be rewritten end to end by someone with database access | Defeats tamper evidence (G5) | Publish the chain head hash to write-once storage on a schedule, so a rewrite no longer matches the anchor |
+| Hidden inputs such as the clock, locale or floating point | Breaks determinism (G3) | All inputs explicit and recorded, including the evaluation date; decimal arithmetic only |
+| Immutable log versus right to erasure | A legal conflict if personal data enters the log | Personal data held in a separate erasable store; the log holds hashes and references only (G8) |

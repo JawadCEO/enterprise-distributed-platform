@@ -1,6 +1,16 @@
-# statutory-validation: Understanding and Plan
+# statutory-validation
 
 **Status:** draft for discussion. No code yet.
+
+## Documents
+
+| Document |
+|---|
+| [Problem statement, goals, users, non-goals](requirements/problem-statement.md) |
+| [Functional requirements](requirements/functional-requirements.md) |
+| [Non-functional requirements and disaster recovery](requirements/non-functional-requirements.md) |
+| [Data the system handles, volumes, retention, sensitivity](requirements/data.md) |
+| [Decisions still needed](requirements/open-questions.md) |
 
 ## Brief
 
@@ -45,14 +55,14 @@ Legal and regulatory rules change often, and they differ by jurisdiction and by 
 
 | Phase | Focus for this project |
 |---|---|
-| 0 | Requirements, non-goals, determinism definition, ADR on rule evaluation approaches |
-| 1 | Rule versioning schema, effective dating, audit log design and immutability, key queries |
-| 2 | Adapted: Kafka is not in the stack. This phase covers how audit records are written without slowing evaluation, and how a newly published rule set reaches every instance |
-| 3 | Evaluation flow, rule compilation and caching, hot reload, thread safety of rule sessions |
-| 4 | Separation of duties for rule approval, audit integrity, data protection |
-| 5 | Latency per rule set, rule hit rates, audit lag, cost model |
-| 6 | Golden-case tests, determinism tests, rule-reload drills, load benchmark |
-| 7 | Deployment, rule-set rollout independent of code rollout, rollback of a bad rule set |
+| 0 | Requirements, answers to the open questions, ADR on the rule engine, determinism definition |
+| 1 | Rule set and engine spike: write the 40 synthetic rules and golden cases, prove Drools evaluation is deterministic, measure evaluation time on the laptop |
+| 2 | Data layer: schema and key queries for rule versions and effective dating, outbox, audit chain, filing snapshots, personal data; partitioning and retention |
+| 3 | Validation hot path: rule set selection, evaluation, outbox write in the request, fail closed, idempotency, hot reload of compiled rule sets |
+| 4 | Audit integrity and data protection: chain builder, external anchors, verification, replay, erasure, insert-only database rights, encryption, roles |
+| 5 | Rule CI and publishing: GitHub Actions pipeline, separation of duties, rule-management, propagation to every instance, rollback of a bad rule set |
+| 6 | Testing and performance: tamper tests, reload and rollback drills, load benchmark against the latency budget, laptop measurements and projections |
+| 7 | Deployment and observability: Kubernetes on the laptop, rule-set rollout independent of code rollout, dashboards and alerts |
 | 8 | ADRs, runbook, results write-up |
 
 ## Laptop fit (16GB)
