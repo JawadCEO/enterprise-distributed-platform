@@ -1,13 +1,23 @@
-# fraud-detection-ml: Understanding and Plan
+# fraud-detection-ml
 
 **Status:** draft for discussion. No code yet.
+
+## Documents
+
+| Document |
+|---|
+| [Problem statement: background, what makes it hard, goals and success metrics, non-goals, constraints](requirements/problem-statement.md) |
+| [Functional requirements with priorities and acceptance checks](requirements/functional-requirements.md) |
+| [Non-functional requirements: targets, latency budget, failure modes, laptop memory budget](requirements/non-functional-requirements.md) |
+| [Data and flow: sources, API contract, end-to-end flows, features, topics, retention](requirements/data.md) |
+| [Decisions still needed, with working assumptions](requirements/open-questions.md) |
 
 ## Brief
 
 | Item | Value |
 |---|---|
 | Domain | Real-time payment risk scoring with feature-store lookups, ML inference, and SHAP explanations |
-| Stack | Python / Go, XGBoost / PyTorch, Redis (feature store), Apache Kafka, PostgreSQL, OpenTelemetry, Kubernetes |
+| Stack | Go (scoring, features) and Python (training, attributions), XGBoost, Redis (feature store), Apache Kafka, PostgreSQL, OpenTelemetry, Kubernetes. Language split and XGBoost-only are working assumptions; see open questions 2 and 3 |
 | Latency target | p95 < 25ms, p99 < 50ms at 10,000 transactions/sec |
 | Availability target | 99.999%, with fallback to a rule engine when inference times out |
 | Accuracy target | ROC-AUC > 0.96, false positive rate < 0.1% |
@@ -40,20 +50,22 @@ A payment is waiting for an approve-or-decline answer, so the score must come ba
 
 - Redis: online features per card, account, and merchant
 - PostgreSQL: decisions, scores, attributions, model registry, fallback rules, labels
-- Kafka: transactions, decisions, feature updates
+- Kafka: scored payments (payment, features, and decision in one event) and labels; see [data.md](requirements/data.md#8-event-topics)
 
 ## Phase plan
 
+Same 9-phase numbering as the rest of the repo, adapted to this project.
+
 | Phase | Focus for this project |
 |---|---|
-| 0 | Requirements, non-goals, latency budget, ADR on low-latency serving options |
-| 1 | Feature key design in Redis, decision and model-registry schema, label feedback |
-| 2 | Transaction and decision topics, ordering per card, late and duplicate events |
-| 3 | Scoring flow, timeout and fallback, feature computation, model loading and hot swap |
-| 4 | Payment-data handling, access control, decision audit |
-| 5 | Latency by stage, model drift and score-distribution monitoring, cost model |
-| 6 | Latency benchmark, fallback drills, offline model evaluation, skew tests |
-| 7 | Deployment, shadow and canary model rollout, rollback |
+| 0 | Requirements, latency budget, ADRs: dataset choice, Go model runtime |
+| 1 | Data and features: dataset profiling, feature specification, point-in-time feature builder (Python), baseline XGBoost model and time-split evaluation report; Redis key design; PostgreSQL schema and queries |
+| 2 | Messaging and streaming features: scored-payment and label topics, partitioning by card, late and duplicate events, Go feature pipeline, training-serving parity test |
+| 3 | Scoring service and recording: API, Go model evaluator and model parity test, rules, timeout and fallback, degraded mode, idempotency, hot swap; decision recorder with SHAP |
+| 4 | Model lifecycle and security: model registry, promotion gate, shadow scoring, rollback, label feedback; authentication, roles, append-only decision audit |
+| 5 | Observability: latency by stage, feature freshness, consumer lag, fallback rate, score and feature drift; projected cost per million scores |
+| 6 | Verification: open-loop latency benchmark, failure drills (model, Redis, Kafka), final holdout evaluation, holdout replay through the live API |
+| 7 | Release: Kubernetes deployment, canary model rollout, rollback drill |
 | 8 | ADRs, runbook, results write-up |
 
 ## Laptop fit (16GB)
