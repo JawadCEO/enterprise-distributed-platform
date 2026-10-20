@@ -1,6 +1,16 @@
-# spring-batch-legacy: Understanding and Plan
+# spring-batch-legacy
 
 **Status:** draft for discussion. No code yet.
+
+## Documents
+
+| Document |
+|---|
+| [Problem statement, goals, users, non-goals](requirements/problem-statement.md) |
+| [Functional requirements](requirements/functional-requirements.md) |
+| [Non-functional requirements and disaster recovery](requirements/non-functional-requirements.md) |
+| [Data received, processed and returned, record layouts, end-to-end flow, volumes, sensitivity](requirements/data.md) |
+| [Decisions still needed](requirements/open-questions.md) |
 
 ## Brief
 
@@ -9,7 +19,7 @@
 | Domain | Replace legacy COBOL EBCDIC flat-file batch processing with distributed Spring Batch pipelines into PostgreSQL, with CDC streaming |
 | Stack | Java, Spring Batch, Spring Boot, PostgreSQL, Kafka (Debezium CDC), Docker, AWS S3 / EFS |
 | Volume target | 50 million records per daily window, within 2 hours |
-| Speed target | > 7,000 records/sec with chunk-based parallel processing |
+| Speed target | > 7,000 records/sec with chunk-based parallel processing (design target 10,000/sec, see open question 6) |
 | Fault tolerance | Restart from the failure point with no duplicate inserts |
 | Integrity target | 100% field parity between the legacy export and PostgreSQL |
 
@@ -50,25 +60,23 @@ The targets agree with each other: 50 million records in 2 hours is about 6,950 
 
 | Phase | Focus for this project |
 |---|---|
-| 0 | Requirements, non-goals, ADR on parallel batch strategy |
-| 1 | Target schema, staging design, natural keys for idempotent upsert, bulk-load tuning |
-| 2 | Adapted: Kafka is used only for CDC output. Topic per table, ordering, schema evolution |
-| 3 | Job and step design, partitioner, chunk size, skip and retry policy, restart semantics |
-| 4 | File integrity checks, access to sensitive fields, job audit |
-| 5 | Throughput and step metrics, job dashboards, cost model |
-| 6 | Parity tests, kill-and-restart drills, throughput benchmark |
-| 7 | Scheduled job deployment, worker scaling, rollback of a bad load |
-| 8 | ADRs, runbook, results write-up |
+| 0 | Requirements, open questions decided, ADRs on parallel strategy and change detection |
+| 1 | Copybook model, EBCDIC and COMP-3 codec, test data generator with faults and expected values |
+| 2 | Target schema, manifest and quarantine tables, hash-based upsert, bulk-load tuning |
+| 3 | Job and step design: intake and integrity check, partitioner, chunk size, skip and retry, restart, missing accounts |
+| 4 | Reconciliation: counts, control totals, per-record hash comparison, field-level diff, report |
+| 5 | Change data capture: Debezium, topic per table, keying and ordering, first-load exclusion, sample consumer |
+| 6 | Job control API, authentication, masking of personal fields, audit |
+| 7 | Metrics, dashboard against the window budget, late-finish alert |
+| 8 | Benchmark at 5 million, scaling curve, kill-and-restart and rollback drills, one full 50 million run, projections and cost model |
+| 9 | Scheduled deployment, remote partitioning design, ADRs, runbook, results write-up |
 
 ## Laptop fit (16GB)
 
-Roughly 4GB of memory. Disk is the real limit: 50 million records at around 200 bytes each is about 10GB for the input file alone, plus the database.
+Roughly 8GB of memory for the whole stack. Disk is the real limit: 50 million records at 250 bytes each is 12.5GB for the input file alone, plus 15 to 20GB for the database.
 
 ## Risks and open questions
 
-1. **Data domain.** What do the records represent (billing, customer accounts, usage)? We need to invent a realistic copybook. It must be synthetic, not a real legacy layout.
-2. **Full-volume run locally.** Run all 50 million on the laptop if disk allows, or run 5 to 10 million and project? Recommendation: benchmark at 5 million, then attempt one full run.
-3. **Parallel strategy.** Multi-threaded step, local partitioning, or remote partitioning across workers. Recommendation: local partitioning by file range first, with remote partitioning designed and documented.
-4. **Idempotency mechanism.** Upsert on a natural key, or a ledger of file and record position, or both.
-5. **Parity proof.** Row counts and per-column checksums, or a full field-by-field comparison? The second is stronger and slower.
-6. **S3 / EFS.** Local runs use MinIO. Real AWS storage would only be exercised if this is deployed through the EKS project.
+The decisions still needed are listed, with their working assumptions, in [open-questions.md](requirements/open-questions.md). One more risk is tracked here:
+
+- **S3 / EFS.** Local runs use MinIO. Real AWS storage would only be exercised if this is deployed through the EKS project.
