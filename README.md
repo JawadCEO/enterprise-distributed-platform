@@ -2,20 +2,20 @@
 
 A portfolio of 8 distributed-systems projects in one repository, organised into 4 tracks.
 
-**Status: planning. No implementation has started.** Each project has an understanding-and-plan document under its `docs/` folder. Code is written only after that project's design has been discussed and approved.
+**Status: planning. No implementation has started.** Each project's `docs/README.md` holds its overview and 9-phase plan, and `docs/requirements/` holds its problem statement, functional and non-functional requirements, data description, and open questions. Code is written only after that project's design has been discussed and approved.
 
 ## Tracks and projects
 
 | Track | Project | One-line summary | Core stack | Plan |
 |---|---|---|---|---|
-| 1. Streaming | `iot-telemetry-pipeline` | High-throughput IoT event ingestion replacing legacy polling | Java, Spring Boot, Kafka, PostgreSQL, Redis | [plan](track-1-streaming/iot-telemetry-pipeline/docs/00-understanding-and-plan.md) |
-| 1. Streaming | `pulselink-platform` | Real-time patient vitals and emergency alert routing | Java, WebFlux, Kafka, TimescaleDB, Redis | [plan](track-1-streaming/pulselink-platform/docs/00-understanding-and-plan.md) |
-| 1. Streaming | `fraud-detection-ml` | Real-time transaction risk scoring with explanations | Python/Go, XGBoost, Redis, Kafka, PostgreSQL | [plan](track-1-streaming/fraud-detection-ml/docs/00-understanding-and-plan.md) |
-| 2. Batch and migration | `spring-batch-legacy` | COBOL flat-file batch replaced by Spring Batch into PostgreSQL | Java, Spring Batch, PostgreSQL, Debezium | [plan](track-2-batch-migration/spring-batch-legacy/docs/00-understanding-and-plan.md) |
-| 2. Batch and migration | `statutory-validation` | Deterministic legal-rules validation with immutable audit | Java, Spring Boot, Drools, PostgreSQL, Redis | [plan](track-2-batch-migration/statutory-validation/docs/00-understanding-and-plan.md) |
-| 3. AI and RAG | `llm-grading-service` | Automated rubric-based grading with LLM pipelines | Python, FastAPI, Celery, pgvector, Redis | [plan](track-3-ai-rag/llm-grading-service/docs/00-understanding-and-plan.md) |
-| 3. AI and RAG | `document-ai-extractor` | PDF to structured entities with bounding-box provenance | Python, PyTorch, Kafka, MinIO, vector DB | [plan](track-3-ai-rag/document-ai-extractor/docs/00-understanding-and-plan.md) |
-| 4. Infrastructure | `eks-gitops-platform` | AWS EKS provisioned by Terraform, delivered by ArgoCD | Terraform, EKS, ArgoCD, Helm, Gatekeeper | [plan](track-4-infrastructure/eks-gitops-platform/docs/00-understanding-and-plan.md) |
+| 1. Streaming | `iot-telemetry-pipeline` | High-throughput IoT event ingestion replacing legacy polling | Java, Spring Boot, Kafka, PostgreSQL, Redis | [plan](track-1-streaming/iot-telemetry-pipeline/docs/README.md) |
+| 1. Streaming | `pulselink-platform` | Real-time patient vitals and emergency alert routing | Java, WebFlux, Kafka, TimescaleDB, Redis | [plan](track-1-streaming/pulselink-platform/docs/README.md) |
+| 1. Streaming | `fraud-detection-ml` | Real-time transaction risk scoring with explanations | Python/Go, XGBoost, Redis, Kafka, PostgreSQL | [plan](track-1-streaming/fraud-detection-ml/docs/README.md) |
+| 2. Batch and migration | `spring-batch-legacy` | COBOL flat-file batch replaced by Spring Batch into PostgreSQL | Java, Spring Batch, PostgreSQL, Debezium | [plan](track-2-batch-migration/spring-batch-legacy/docs/README.md) |
+| 2. Batch and migration | `statutory-validation` | Deterministic legal-rules validation with immutable audit | Java, Spring Boot, Drools, PostgreSQL, Redis | [plan](track-2-batch-migration/statutory-validation/docs/README.md) |
+| 3. AI and RAG | `llm-grading-service` | Automated rubric-based grading with LLM pipelines | Python, FastAPI, Celery, pgvector, Redis | [plan](track-3-ai-rag/llm-grading-service/docs/README.md) |
+| 3. AI and RAG | `document-ai-extractor` | PDF to structured entities with bounding-box provenance | Python, PyTorch, Kafka, MinIO, vector DB | [plan](track-3-ai-rag/document-ai-extractor/docs/README.md) |
+| 4. Infrastructure | `eks-gitops-platform` | AWS EKS provisioned by Terraform, delivered by ArgoCD | Terraform, EKS, ArgoCD, Helm, Gatekeeper | [plan](track-4-infrastructure/eks-gitops-platform/docs/README.md) |
 
 Shared modules: `track-1-streaming/common-resilience`, `track-2-batch-migration/common-database`, `track-3-ai-rag/common-fastapi`. Their contents are decided when the first project in each track reaches its service-layer design, so that they hold code two projects really share.
 
