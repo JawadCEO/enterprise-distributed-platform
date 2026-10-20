@@ -1,6 +1,16 @@
-# llm-grading-service: Understanding and Plan
+# llm-grading-service
 
 **Status:** draft for discussion. No code yet.
+
+## Documents
+
+| Document |
+|---|
+| [Problem statement, goals, users, non-goals](requirements/problem-statement.md) |
+| [Functional requirements](requirements/functional-requirements.md) |
+| [Non-functional requirements and disaster recovery](requirements/non-functional-requirements.md) |
+| [Data received, processed, and returned; end-to-end flow, volumes, retention](requirements/data.md) |
+| [Decisions still needed and working assumptions](requirements/open-questions.md) |
 
 ## Brief
 
@@ -45,15 +55,16 @@ An instructor defines a rubric: criteria, point scales, and what each level look
 
 | Phase | Focus for this project |
 |---|---|
-| 0 | Requirements, non-goals, quality metric, ADR on model orchestration backends |
-| 1 | Rubric and result schema, job lifecycle, vector index choice, key queries |
-| 2 | Adapted: Celery and Redis in place of Kafka. Queue layout, priorities, retries, dead letters, idempotent jobs |
-| 3 | Grading pipeline, prompt design, output validation, batching, timeouts, model fallback |
-| 4 | Student data privacy, prompt-injection defence, access control |
-| 5 | Token and cost tracking, queue depth, quality drift, cost model |
-| 6 | Quality evaluation against human grades, queue failure drills, load benchmark |
-| 7 | Deployment, worker autoscaling on queue depth, prompt and model rollout |
-| 8 | ADRs, runbook, results write-up |
+| 0 | Requirements, non-goals, quality metric, decisions A1 to A5, dataset licence check, ADR on model backends |
+| 1 | Data model: rubric and result schema, job lifecycle, pgvector index choice, key queries |
+| 2 | Async jobs with Celery and Redis: queue layout, priorities, retries, dead letters, idempotent jobs, reconciler |
+| 3 | Grading pipeline: model backend interface (local and hosted), retrieval, prompt design, output validation and repair, confidence, exact-match cache |
+| 4 | Evaluation harness: agreement with human scores (QWK) per criterion, consistency sample, prompt-injection test set |
+| 5 | Instructor workflow and security: review, override, approval, publication, access control, privacy, injection defence |
+| 6 | Cost and observability: token and cost tracking, budgets, queue depth, quality drift, traces and alerts |
+| 7 | Load and failure testing on the laptop: 500-job burst, worker crash, Redis and model backend outages, projections beyond the laptop |
+| 8 | Deployment: containers, Kubernetes, worker autoscaling on queue depth, prompt and model rollout gated on the evaluation |
+| 9 | ADRs, runbook, results write-up |
 
 ## Laptop fit (16GB)
 
