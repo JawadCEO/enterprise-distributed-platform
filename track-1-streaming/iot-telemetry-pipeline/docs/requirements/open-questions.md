@@ -1,10 +1,12 @@
 # iot-telemetry-pipeline: Open Questions
 
-Decisions needed before the data layer design. Until they are answered, the requirement documents use each recommendation as a working assumption, marked **[assumption, Qn]**.
+The domain and the end-to-end picture are agreed: a carrier IoT connectivity platform, described in [how-it-works.md](how-it-works.md). Until a question below is answered, the documents use its recommendation as a working assumption, marked **[assumption, Qn]**.
 
-1. **Tenants.** I have assumed devices belong to tenants (customers or fleets) and that rate limits apply per tenant as well as per device. Correct? Recommendation: yes.
-2. **Offline detection (FR-13).** Should the platform mark devices offline when heartbeats stop? It is the feature that most directly replaces polling. Recommendation: yes.
-3. **What PostgreSQL stores.** Given 1.3 billion events a day, which is it: status changes only, a short raw-event window, or aggregates? Recommendation: latest status, status changes for 90 days, and raw telemetry for 48 hours in hourly partitions. Kafka keeps the 7-day raw record for replay. A 7-day window in PostgreSQL would be about 9 billion rows at full scale.
-4. **Legacy system.** Do we include a small legacy poller and a cut-over story (run both, compare, switch), or only the new pipeline? Recommendation: only the new pipeline, with the migration approach documented.
-5. **Capacity inputs.** Are 5 million devices, 500-byte events, and a 15,000 events/sec average reasonable for the story you want to tell? Recommendation: keep them. They work out to about one event per device every 5.5 minutes.
-6. **Multi-region.** Design it fully and simulate two regions locally in a later phase, or design only? Recommendation: design now, simulate in Phase 6.
+1. **Customers and rate limits.** Lines belong to business customers, and rate limits apply per customer as well as per line. Recommendation: yes.
+2. **Offline alerts.** Report a line offline when it detaches or its keep-alives stop, but not for expected silence (suspended, profile switch) and not line by line during a regional outage. Recommendation: yes.
+3. **What PostgreSQL stores.** Current state for every line; 90 days of history (state changes, attach/detach, requests); 13 months of usage; keep-alives and routine readings only update current state and aren't stored row by row. Kafka keeps 7 days of raw events for replay. Recommendation: yes. The alternative, storing every raw event for 7 days, is about 9 billion rows.
+4. **Legacy poller.** Build only the new platform and document the cut-over (run both, compare, switch). Recommendation: yes.
+5. **Capacity.** 5 million lines, ~500-byte events, 15,000 events/sec on average and 50,000 at peak; laptop pass target 5,000/sec. Recommendation: keep these.
+6. **Multi-region.** Design it fully now and simulate two regions locally in Phase 6. Recommendation: yes.
+7. **Remote profile switch (Flow E).** Include it as P2, built only if time allows. Recommendation: yes, P2.
+8. **Two PoCs before Phase 0 closes.** Polling vs push (requests/sec, detection delay) and HTTP vs MQTT ingestion (throughput per core, behaviour when 10% of devices disconnect at once). Recommendation: yes.
