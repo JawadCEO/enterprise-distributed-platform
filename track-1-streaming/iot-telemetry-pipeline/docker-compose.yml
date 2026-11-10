@@ -1,7 +1,7 @@
 name: iot-telemetry
-# Local stack: one Kafka broker (KRaft), PostgreSQL, Redis and the five services, with memory caps
+# Local stack: one Kafka broker (KRaft), PostgreSQL, Redis and the four services, with memory caps
 # sized for a 16GB laptop. The simulator runs on demand:
-#   docker compose --profile sim run --rm device-simulator
+#   docker compose --profile sim run --rm network-simulator
 # Three brokers for failure drills: add -f docker-compose.drills.yml
 
 x-service: &service
@@ -75,16 +75,18 @@ services:
       timeout: 3s
       retries: 20
 
-  # Owns the schema: Flyway runs here, so the other services start after it is healthy.
-  device-status-api:
+  # Owns the schema: Flyway runs here, so the other services start after it is healthy. It also
+  # stores dead letters from network.events.dlq and replays them.
+  customer-api:
     <<: *service
-    build: { context: ., args: { MODULE: device-status-api } }
-    image: iot/device-status-api
+    build: { context: ., args: { MODULE: customer-api } }
+    image: iot/customer-api
     ports:
       - "${IOT_API_PORT:-18084}:8084"
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
+      kafka: { condition: service_healthy }
     healthcheck: &health
       test: ["CMD-SHELL", "wget -qO- http://localhost:$${SERVER_PORT:-8084}/actuator/health | grep -q UP"]
       interval: 10s
@@ -92,24 +94,24 @@ services:
       retries: 30
       start_period: 20s
 
-  ingestion-gateway:
+  event-ingest:
     <<: *service
-    build: { context: ., args: { MODULE: ingestion-gateway } }
-    image: iot/ingestion-gateway
+    build: { context: ., args: { MODULE: event-ingest } }
+    image: iot/event-ingest
     ports:
-      - "${IOT_GATEWAY_PORT:-18080}:8080"
+      - "${IOT_INGEST_PORT:-18080}:8080"
     environment:
       <<: *service-env
       SERVER_PORT: "8080"
     depends_on:
       kafka: { condition: service_healthy }
-      device-status-api: { condition: service_healthy }
+      customer-api: { condition: service_healthy }
     healthcheck: *health
 
-  telemetry-processor:
+  state-processor:
     <<: *service
-    build: { context: ., args: { MODULE: telemetry-processor } }
-    image: iot/telemetry-processor
+    build: { context: ., args: { MODULE: state-processor } }
+    image: iot/state-processor
     ports:
       - "18081:8081"
     environment:
@@ -118,7 +120,7 @@ services:
       PROCESSOR_CONCURRENCY: "3"
     depends_on:
       kafka: { condition: service_healthy }
-      device-status-api: { condition: service_healthy }
+      customer-api: { condition: service_healthy }
     healthcheck: *health
 
   presence-monitor:
@@ -132,33 +134,20 @@ services:
       SERVER_PORT: "8082"
     depends_on:
       kafka: { condition: service_healthy }
-      device-status-api: { condition: service_healthy }
+      customer-api: { condition: service_healthy }
     healthcheck: *health
 
-  dead-letter-service:
-    <<: *service
-    build: { context: ., args: { MODULE: dead-letter-service } }
-    image: iot/dead-letter-service
-    ports:
-      - "${IOT_DLQ_PORT:-18083}:8083"
-    environment:
-      <<: *service-env
-      SERVER_PORT: "8083"
-    depends_on:
-      kafka: { condition: service_healthy }
-      device-status-api: { condition: service_healthy }
-    healthcheck: *health
-
-  device-simulator:
+  network-simulator:
     profiles: ["sim"]
-    build: { context: ., args: { MODULE: device-simulator } }
-    image: iot/device-simulator
+    build: { context: ., args: { MODULE: network-simulator } }
+    image: iot/network-simulator
     environment:
-      GATEWAY_URL: http://ingestion-gateway:8080
-      STATUS_API_URL: http://device-status-api:8084
+      INGEST_URL: http://event-ingest:8080
+      API_URL: http://customer-api:8084
       SCENARIO: ${SCENARIO:-steady}
-      DEVICES: ${DEVICES:-1000}
-      HEARTBEAT_SECONDS: ${HEARTBEAT_SECONDS:-10}
+      LINES: ${LINES:-1000}
+      CUSTOMERS: ${CUSTOMERS:-5}
+      TICK_SECONDS: ${TICK_SECONDS:-10}
       DURATION: ${DURATION:-120s}
       LEDGER_FILE: /ledger/ack-ledger.csv
       IOT_OPERATOR_KEY: ${IOT_OPERATOR_KEY:-iot_localop_local-dev-only-operator-key}
@@ -167,4 +156,4 @@ services:
       - ./target/ledger:/ledger
     mem_limit: 512m
     depends_on:
-      ingestion-gateway: { condition: service_healthy }
+      event-ingest: { condition: service_healthy }

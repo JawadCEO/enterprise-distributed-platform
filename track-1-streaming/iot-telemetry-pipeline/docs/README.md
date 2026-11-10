@@ -1,6 +1,6 @@
 # iot-telemetry-pipeline
 
-**Status:** draft for review. No code yet.
+**Status:** building. Part 2a (lines and network events) is built and runs end to end; see the [2a run](results/carrier-2a-run-2026-11-10.md). Customer requests, provisioning and webhooks come next.
 
 A mobile carrier's IoT connectivity platform (like Verizon ThingSpace): millions of SIM-connected trackers, meters and sensors for business customers. Start with [how it works](requirements/how-it-works.md).
 
@@ -46,15 +46,15 @@ Today customers poll the carrier to learn whether their devices are online, whet
 
 **Six services plus a simulator** (see the [high-level design](architecture/high-level-design.md#2-services))
 
-| Service | Responsibility |
-|---|---|
-| `event-ingest` | Accepts network and device events, authenticates, rate limits, publishes to Kafka |
-| `customer-api` | Customer line requests, queries, webhook subscriptions |
-| `state-processor` | Applies events to line, device and usage state, in order, without duplicates |
-| `presence-monitor` | Marks lines offline when keep-alives stop; outage guard |
-| `provisioning-worker` | Carries out line changes against the network |
-| `notifier` | Delivers webhooks with retries |
-| `network-simulator` | Test tool: network, devices and provisioning, with faults on demand |
+| Service | Responsibility | Built |
+|---|---|---|
+| `event-ingest` | Accepts network and device events, authenticates, rate limits, publishes to Kafka | Yes |
+| `customer-api` | Registry and line import, line queries, dead letters and replay; later customer line requests and webhook subscriptions | Queries and registry |
+| `state-processor` | Applies events to line, device and usage state, in order, without duplicates | Yes |
+| `presence-monitor` | Marks lines offline when keep-alives stop; outage guard | Offline marking |
+| `provisioning-worker` | Carries out line changes against the network | Part 2b |
+| `notifier` | Delivers webhooks with retries | Part 2c |
+| `network-simulator` | Test tool: network and devices with faults on demand, and a usage ledger it reconciles at the end | Network and devices |
 
 **Data stores**
 

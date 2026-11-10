@@ -1,0 +1,176 @@
+package com.edp.iot.state.pipeline;
+
+import com.edp.iot.common.change.LineChange;
+import com.edp.iot.common.change.LineChangeOutbox;
+import com.edp.iot.common.deadletter.ReasonCodes;
+import com.edp.iot.common.event.EventType;
+import com.edp.iot.common.event.NetworkEvent;
+import com.edp.iot.common.line.LineInfo;
+import com.edp.iot.common.line.LineRegistry;
+import com.edp.iot.common.line.LineState;
+import com.edp.iot.common.state.DeviceState;
+import com.edp.iot.state.StateProperties;
+import com.edp.iot.state.model.LineModel;
+import com.edp.iot.state.model.SecurityEvent;
+import com.edp.iot.state.model.UsageCycle;
+import com.edp.iot.state.store.StateStore;
+import org.springframework.stereotype.Component;
+import org.springframework.transaction.support.TransactionTemplate;
+
+import java.time.Instant;
+import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
+
+/**
+ * Applies a batch of events (data.md section 3, stages 3 to 8). One transaction per batch:
+ * <ol>
+ *   <li>drop events for lines that were deleted or deactivated after their ack (dead letter)</li>
+ *   <li>drop events already processed (Redis duplicate keys, ADR-006)</li>
+ *   <li>lock the batch's lines in a stable order, then load their device state and usage cycles</li>
+ *   <li>insert usage records keyed by event ID; only new ones count toward the total</li>
+ *   <li>fold each line's events through {@link LineModel} and write state, usage, line state,
+ *       security events and history (the history rows are the outbox for {@code line.changes})</li>
+ * </ol>
+ * After commit it updates Redis and publishes the changes. A failure before commit leaves nothing
+ * behind, so the whole batch can be retried.
+ */
+@Component
+public class EventProcessor {
+
+    public record DeadLetter(NetworkEvent event, String reasonCode, String reason) {
+    }
+
+    public record Result(int applied, List<LineChange> changes, List<DeadLetter> deadLetters) {
+    }
+
+    private record Committed(List<DeviceState> states, List<LineChange> changes, int applied, int usageCounted,
+                             Set<String> lineStateChanged) {
+    }
+
+    private final LineRegistry registry;
+    private final StateStore store;
+    private final RedisState redis;
+    private final LineChangeOutbox outbox;
+    private final TransactionTemplate tx;
+    private final StateProperties props;
+    private final StateMetrics metrics;
+
+    public EventProcessor(LineRegistry registry, StateStore store, RedisState redis, LineChangeOutbox outbox,
+                          TransactionTemplate tx, StateProperties props, StateMetrics metrics) {
+        this.registry = registry;
+        this.store = store;
+        this.redis = redis;
+        this.outbox = outbox;
+        this.tx = tx;
+        this.props = props;
+        this.metrics = metrics;
+    }
+
+    public Result process(List<NetworkEvent> events) {
+        Map<String, LineInfo> lines = registry.findAll(events.stream().map(NetworkEvent::lineId).distinct().toList());
+
+        List<NetworkEvent> valid = new ArrayList<>(events.size());
+        List<DeadLetter> deadLetters = new ArrayList<>();
+        for (NetworkEvent e : events) {
+            LineInfo line = lines.get(e.lineId());
+            if (line == null) {
+                deadLetters.add(new DeadLetter(e, ReasonCodes.UNKNOWN_LINE, "Line is not registered"));
+            } else if (line.isDeactivated()) {
+                deadLetters.add(new DeadLetter(e, ReasonCodes.INACTIVE_LINE, "Line was deactivated"));
+            } else {
+                valid.add(e);
+            }
+        }
+        metrics.deadLettered(deadLetters.size());
+        if (valid.isEmpty()) {
+            return new Result(0, List.of(), deadLetters);
+        }
+
+        Set<UUID> seen = new HashSet<>(redis.alreadySeen(valid));
+        Map<String, List<NetworkEvent>> byLine = new LinkedHashMap<>();
+        List<NetworkEvent> fresh = new ArrayList<>(valid.size());
+        for (NetworkEvent e : valid) {
+            // seen.add also drops a second copy of the same event within this batch
+            if (seen.add(e.eventId())) {
+                fresh.add(e);
+                byLine.computeIfAbsent(e.lineId(), k -> new ArrayList<>()).add(e);
+            }
+        }
+        if (fresh.isEmpty()) {
+            metrics.committed(List.of(), 0, valid.size(), 0, 0);
+            return new Result(0, List.of(), deadLetters);
+        }
+
+        List<NetworkEvent> usage = fresh.stream().filter(e -> e.type() == EventType.USAGE_RECORD).toList();
+        Set<LocalDate> cycleStarts = new HashSet<>();
+        usage.forEach(e -> cycleStarts.add(UsageCycle.cycleOf(e.networkTime())));
+
+        Committed committed = tx.execute(status -> {
+            Map<String, LineState> lineStates = store.lockLines(byLine.keySet());
+            Map<String, DeviceState> states = store.loadStates(byLine.keySet());
+            Map<String, Map<LocalDate, UsageCycle>> cycles = store.lockCycles(
+                    usage.stream().map(NetworkEvent::lineId).distinct().toList(), cycleStarts);
+            Set<UUID> counted = store.insertUsage(usage);
+
+            List<DeviceState> stateUpdates = new ArrayList<>();
+            List<UsageCycle> cycleUpdates = new ArrayList<>();
+            Map<String, LineState> lineStateUpdates = new HashMap<>();
+            List<SecurityEvent> security = new ArrayList<>();
+            List<LineChange> changes = new ArrayList<>();
+            int applied = 0;
+            for (Map.Entry<String, List<NetworkEvent>> entry : byLine.entrySet()) {
+                String iccid = entry.getKey();
+                LineInfo line = lines.get(iccid);
+                LineState current = lineStates.getOrDefault(iccid, line.lineState());
+                LineModel.Result r = LineModel.apply(
+                        new LineModel.Snapshot(line, current, states.get(iccid), cycles.get(iccid)),
+                        entry.getValue(), counted);
+                if (r.state() != null) {
+                    stateUpdates.add(r.state());
+                }
+                cycleUpdates.addAll(r.cycles().values());
+                if (r.lineState() != null && current.canMoveTo(r.lineState())) {
+                    lineStateUpdates.put(iccid, r.lineState());
+                }
+                security.addAll(r.securityEvents());
+                changes.addAll(r.changes());
+                applied += r.applied();
+            }
+            store.upsertStates(stateUpdates);
+            store.upsertCycles(cycleUpdates);
+            store.updateLineStates(lineStateUpdates);
+            store.insertSecurityEvents(security);
+            outbox.insert(changes);
+            return new Committed(stateUpdates, changes, applied, counted.size(), lineStateUpdates.keySet());
+        });
+
+        committed.lineStateChanged().forEach(registry::invalidate);
+        redis.afterCommit(fresh, committed.states(), deadlines(byLine, lines));
+        metrics.committed(fresh.stream().map(NetworkEvent::receivedAt).toList(), committed.applied(), valid.size(),
+                committed.changes().size(), committed.usageCounted());
+        outbox.publishCommitted(committed.changes());
+        return new Result(committed.applied(), committed.changes(), deadLetters);
+    }
+
+    /**
+     * Offline deadline per line: latest receive time of a sign of life in the batch + keep-alive
+     * window + grace. A detach is not a sign of life.
+     */
+    private Map<String, Instant> deadlines(Map<String, List<NetworkEvent>> byLine, Map<String, LineInfo> lines) {
+        Map<String, Instant> deadlines = new HashMap<>();
+        byLine.forEach((iccid, lineEvents) -> lineEvents.stream()
+                .filter(e -> e.type() != EventType.DEVICE_DETACHED)
+                .map(NetworkEvent::receivedAt)
+                .max(Instant::compareTo)
+                .ifPresent(latest -> deadlines.put(iccid,
+                        latest.plus(lines.get(iccid).keepAliveWindow()).plus(props.presenceGrace()))));
+        return deadlines;
+    }
+}

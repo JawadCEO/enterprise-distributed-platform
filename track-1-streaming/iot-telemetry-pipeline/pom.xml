@@ -16,16 +16,15 @@
     <version>0.1.0-SNAPSHOT</version>
     <packaging>pom</packaging>
     <name>iot-telemetry-pipeline</name>
-    <description>Event-driven ingestion and status processing for IoT devices</description>
+    <description>Carrier IoT connectivity platform: network events, line state, usage and customer requests</description>
 
     <modules>
-        <module>telemetry-common</module>
-        <module>ingestion-gateway</module>
-        <module>telemetry-processor</module>
+        <module>platform-common</module>
+        <module>event-ingest</module>
+        <module>state-processor</module>
         <module>presence-monitor</module>
-        <module>dead-letter-service</module>
-        <module>device-status-api</module>
-        <module>device-simulator</module>
+        <module>customer-api</module>
+        <module>network-simulator</module>
     </modules>
 
     <properties>
@@ -37,7 +36,7 @@
         <dependencies>
             <dependency>
                 <groupId>com.edp.iot</groupId>
-                <artifactId>telemetry-common</artifactId>
+                <artifactId>platform-common</artifactId>
                 <version>${project.version}</version>
             </dependency>
         </dependencies>

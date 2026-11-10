@@ -1,0 +1,20 @@
+spring:
+  application:
+    name: network-simulator
+  main:
+    web-application-type: none
+    banner-mode: off
+
+iot:
+  sim:
+    ingest-url: ${INGEST_URL:http://localhost:8080}
+    api-url: ${API_URL:http://localhost:8084}
+    operator-key: ${IOT_OPERATOR_KEY:}
+    network-key: ${NETWORK_KEY:}
+    scenario: ${SCENARIO:steady}
+    lines: ${LINES:1000}
+    customers: ${CUSTOMERS:5}
+    tick-seconds: ${TICK_SECONDS:10}
+    duration: ${DURATION:300s}
+    reconcile: ${RECONCILE:true}
+    ledger-file: ${LEDGER_FILE:ack-ledger.csv}

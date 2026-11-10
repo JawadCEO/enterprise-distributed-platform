@@ -1,5 +1,5 @@
 # Runtime image for any one service. Build the jars first:  ./mvnw package -DskipTests
-# then: docker build --build-arg MODULE=ingestion-gateway -t iot/ingestion-gateway .
+# then: docker build --build-arg MODULE=event-ingest -t iot/event-ingest .
 FROM eclipse-temurin:17-jre-alpine
 
 ARG MODULE
