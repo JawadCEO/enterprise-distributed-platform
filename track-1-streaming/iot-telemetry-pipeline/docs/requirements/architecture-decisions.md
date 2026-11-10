@@ -45,4 +45,18 @@
 
 ## ADR-005: Ordering and late events
 
-**Decision:** partition by device ID so one device's events stay in order. Each event carries a per-device sequence number. The status update applies only if the incoming sequence is higher than the stored one, so a late or replayed event can never overwrite newer state.
+**Decision:** partition by device ID so one device's events stay in order. Each event carries an ordering key of two parts: `bootId`, a counter the device increases on every restart, and `sequence`, which restarts at 0 on each boot. Keys are compared as `(bootId, sequence)`: a higher `bootId` always wins, and within one boot a higher `sequence` wins. The status update applies only if the incoming key is higher than the stored one, so a late or replayed event can never overwrite newer state.
+
+A sequence number on its own is not enough. Devices often reset their counter when they reboot. With a plain sequence, every event after a reset would look older than the stored state, and the device's status would freeze permanently.
+
+## ADR-006: Duplicate detection for telemetry rows
+
+PostgreSQL requires a unique constraint on a partitioned table to include the partition column. Telemetry is partitioned by receive hour, so the database alone cannot reject a duplicate that a device resends in a later hour.
+
+| Option | For | Against |
+|---|---|---|
+| **Redis key per `(deviceId, bootId, sequence)` with a TTL longer than the device resend window** | Cheap check before the insert; works across partitions | Adds a Redis dependency on the write path; if Redis is lost, a few duplicate rows can appear |
+| Partition by device time | The unique constraint then works | Device clocks are untrusted; a bad clock lands rows in the wrong partition |
+| Accept duplicate rows and remove them on read | Simplest write path | Every history query pays the cost; row counts are inflated |
+
+**Decision: a Redis duplicate key, TTL 24 hours.** A unique constraint inside each partition still catches repeats within the same hour. Status is protected by ADR-005 either way, so a duplicate row after a Redis loss affects history only, never current status.

@@ -21,7 +21,7 @@ Polling ties cost and freshness to the polling interval rather than to how often
 | Correlated degradation | Slow or unreachable devices hold connections and stretch the cycle | One regional outage delays freshness for the whole fleet |
 | Slow offline detection | A missed poll is ambiguous (is the device slow, or gone?), so several misses are needed to confirm | Offline is confirmed only after several intervals |
 
-Shortening the interval improves freshness but multiplies the cost, so tuning cannot fix this. The flow has to be inverted.
+The cost model behind these figures is simple: polls per second = devices / interval, and mean detection delay = interval / 2. Halving the interval halves the delay and doubles the load. Shortening the interval improves freshness but multiplies the cost, so tuning cannot fix this. The flow has to be inverted.
 
 ## 3. Who is affected
 
@@ -44,9 +44,9 @@ Each goal has a metric that a test or a drill can check.
 |---|---|---|
 | G1 | Fresh status | A new status is queryable within 50ms p95 and 150ms p99 of the gateway receiving the event |
 | G2 | Fast offline detection | A silent device is marked offline within its heartbeat window plus 30s **[assumption, Q2]** |
-| G3 | Throughput | 50,000 events/sec sustained for 10 minutes with flat consumer lag. This is a design target; the laptop figure is measured and projected. |
+| G3 | Throughput | Full scale: 50,000 events/sec sustained for 10 minutes with flat consumer lag (design target, projected). Laptop: at least 5,000 events/sec at p95 < 50ms for 10 minutes **[assumption]**, with the figure confirmed after a Phase 3 spike. |
 | G4 | No loss | Zero acknowledged events lost across broker, database, and service-kill drills |
-| G5 | Fault isolation | A malformed event delays later events for the same device by no more than one retry hop. A tenant sending 10x its limit leaves other tenants' latency within G1. |
+| G5 | Fault isolation | A failing event never blocks its partition: lag on that partition returns to normal within 30s. A tenant sending 10x its limit leaves other tenants' latency within G1. |
 | G6 | Cost follows change | An idle device costs one heartbeat per window, and nothing is polled |
 
 ## 6. Non-goals
@@ -71,6 +71,7 @@ Each goal has a metric that a test or a drill can check.
 
 1. **Durability versus latency across regions.** Zero loss without a synchronous cross-region write depends on devices resending events (ADR-004).
 2. **Database write volume.** About 1.3 billion events a day cannot all live in PostgreSQL for long, so what it stores is a deliberate choice **[assumption, Q3]**.
-3. **Ordering with non-blocking retries.** Retried events arrive out of order. Correctness relies on per-device sequence numbers (ADR-005).
+3. **Ordering with non-blocking retries.** Retried events arrive out of order, and devices reset their counters when they reboot. Correctness relies on a per-device ordering key of boot counter plus sequence (ADR-005).
 4. **Hot keys.** One chatty device or tenant can overload a partition. Rate limits at the gateway contain it.
 5. **Untrusted device clocks.** Device timestamps can be wrong. Ordering uses sequence numbers, and the platform records its own receive time.
+6. **Telling silence from outage.** A device that stops reporting looks the same as a platform that stopped receiving. Offline detection must not mark the fleet offline after the platform's own outage (FR-20).

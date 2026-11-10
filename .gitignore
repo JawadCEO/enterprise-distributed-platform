@@ -67,3 +67,9 @@ desktop.ini
 *.log
 logs/
 tmp/
+
+# Build output
+target/
+
+# Temporary transfer folder
+.claude-transfer/
