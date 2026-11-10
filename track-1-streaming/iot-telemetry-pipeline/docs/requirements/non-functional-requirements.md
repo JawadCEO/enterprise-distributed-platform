@@ -6,7 +6,7 @@
 
 | ID | Area | Target | How it is measured | Verified on laptop |
 |---|---|---|---|---|
-| NFR-1 | Throughput | 50,000 events/sec at peak, 15,000 on average **[assumption, Q5]** | Sustained for 10 minutes with consumer lag not growing | Projected; laptop rate measured |
+| NFR-1 | Throughput | Full scale: 50,000 events/sec at peak, 15,000 on average **[assumption, Q5]**. Laptop: at least 5,000 events/sec **[assumption]** | Sustained for 10 minutes with consumer lag not growing | Laptop target: yes. Full scale: projected |
 | NFR-2 | Freshness latency | p95 < 50ms, p99 < 150ms | From the gateway receiving an event to its status being readable, measured with trace timestamps at each hop | Yes, at laptop load |
 | NFR-3 | Ingest latency | p99 < 30ms for the gateway's acknowledgement | Gateway request duration, including the Kafka confirmation | Yes |
 | NFR-4 | Read latency | p99 < 20ms for current status, < 200ms for one page of history | `device-status-api` request duration | Yes |
@@ -37,7 +37,7 @@ The consumer's batching delay is the main lever: larger batches raise throughput
 |---|---|---|
 | NFR-9 | Ordering | Per device. There is no ordering guarantee across devices. |
 | NFR-10 | Delivery | At least once, processed idempotently. The stored result is the same as if each event were processed exactly once. |
-| NFR-11 | Consistency | Status reads may lag writes by at most the freshness target. A cached status is never older than its PostgreSQL row by more than the cache refresh path. |
+| NFR-11 | Consistency | A status read is never more than 1s behind PostgreSQL. The cache is written after the database, and on any Redis error the read goes to PostgreSQL. |
 
 ## 4. Scalability
 
@@ -46,6 +46,7 @@ The consumer's batching delay is the main lever: larger batches raise throughput
 | NFR-12 | Horizontal scaling | Adding gateway or processor instances raises throughput with no code change, up to one processor per partition |
 | NFR-13 | Headroom | The partition count supports 3x peak (150,000 events/sec) without repartitioning |
 | NFR-14 | Fleet growth | 10x the devices (50 million) needs more capacity, not a new design |
+| NFR-24 | Back-pressure | When Kafka is slow, the gateway caps in-flight produce requests and sheds load with 503 and `Retry-After`. It never queues unboundedly in memory, and its heap stays flat during a broker outage. |
 
 ## 5. Security
 
@@ -75,3 +76,4 @@ The consumer's batching delay is the main lever: larger batches raise throughput
 | Database primary | Processing pauses and events wait in Kafka, then processing resumes | No loss; lag clears after failover |
 | Redis | Rate limiting falls back to a local limit; status reads fall back to PostgreSQL | Degraded, not down |
 | Whole region | Traffic moves to the other region; devices resend unacknowledged events | RTO < 60s, no loss end to end |
+| Cross-region replication lag | Only a device's home region marks it offline, so replication lag cannot cause a false offline in the other region. If the home region is lost, the surviving region takes over offline marking after one heartbeat window. | No false offline from lag |

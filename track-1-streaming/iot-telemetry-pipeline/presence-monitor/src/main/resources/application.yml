@@ -1,0 +1,33 @@
+server:
+  port: 8082
+
+spring:
+  application:
+    name: presence-monitor
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/iot}
+    username: ${DB_USER:iot}
+    password: ${DB_PASSWORD:iot}
+    hikari:
+      maximum-pool-size: 4
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:9092}
+    producer:
+      acks: all
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+
+iot:
+  presence:
+    region: ${REGION:local}
+    scan-interval-ms: ${PRESENCE_SCAN_INTERVAL_MS:10000}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics

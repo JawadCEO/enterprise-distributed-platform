@@ -1,0 +1,35 @@
+server:
+  port: 8084
+
+spring:
+  application:
+    name: device-status-api
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/iot}
+    username: ${DB_USER:iot}
+    password: ${DB_PASSWORD:iot}
+    hikari:
+      maximum-pool-size: 10
+  flyway:
+    enabled: true
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      timeout: 200ms
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.autoconfigure.kafka.KafkaAutoConfiguration
+
+iot:
+  security:
+    bootstrap-operator-key: ${IOT_OPERATOR_KEY:}
+
+management:
+  health:
+    redis:
+      enabled: false
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics

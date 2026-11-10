@@ -66,7 +66,7 @@ One change from the first plan: retries are handled inside `telemetry-processor`
 ### 3.1 Ingestion
 
 1. A device sends a batch of events over HTTPS.
-2. The gateway authenticates the device and rejects oversized or malformed requests.
+2. The gateway authenticates the device, checks it against a local registry cache (unknown or inactive devices get 403), and rejects oversized or malformed requests.
 3. The gateway checks the device and tenant rate limits in Redis. Over the limit, it answers "slow down" with a retry delay.
 4. The gateway publishes each event to `telemetry.raw`, keyed by device ID.
 5. Only after Kafka confirms the write does the gateway acknowledge the device. A device that gets no acknowledgement resends.
@@ -74,9 +74,9 @@ One change from the first plan: retries are handled inside `telemetry-processor`
 ### 3.2 Processing
 
 1. `telemetry-processor` reads a batch from `telemetry.raw`.
-2. For each event it checks the device exists and is active.
-3. It writes the telemetry row. A repeat of the same device and sequence number is ignored.
-4. It updates the device's latest status, but only if the event's sequence number is higher than the stored one.
+2. For each event it checks the device is still active (it may have been deactivated after the ack).
+3. It checks a Redis duplicate key on `(deviceId, bootId, sequence)` and writes the telemetry row only for a new event (ADR-006).
+4. It updates the device's latest status, derived from the status model, but only if the event's `(bootId, sequence)` key is higher than the stored one (ADR-005).
 5. It refreshes the status cache and the last-seen time in Redis.
 6. If the status actually changed, it publishes to `device.status-changed`.
 7. It commits the Kafka offset only after the batch is stored.
@@ -86,14 +86,14 @@ One change from the first plan: retries are handled inside `telemetry-processor`
 | Failure type | Example | Action |
 |---|---|---|
 | Temporary | Database timeout | Send to `telemetry.retry.5s`, then `.1m`, then `.10m` |
-| Permanent | Unknown device, invalid payload | Send straight to `telemetry.dlq` |
+| Permanent | Device deactivated after the ack, invalid payload | Send straight to `telemetry.dlq` |
 | Retries exhausted | Still failing after the last tier | Send to `telemetry.dlq` |
 
-Retrying on a separate topic means later events from the same device overtake the failed one. That is safe here because of the sequence rule in step 4: a retried older event can add its telemetry row but can never overwrite newer status.
+Retrying on a separate topic means later events from the same device overtake the failed one. That is safe here because of the ordering rule in step 4: a retried older event can add its telemetry row but can never overwrite newer status.
 
 ### 3.4 Offline detection
 
-Redis keeps each device's last-seen time in a sorted structure ordered by time. `presence-monitor` periodically asks for devices whose time is older than their heartbeat window, marks them offline, and publishes the change. A device that reports again is marked online by the normal processing flow.
+Redis keeps each device's last-seen time in a sorted structure ordered by time. `presence-monitor` periodically asks for devices whose time is older than their heartbeat window, marks them offline, and publishes the change. It only does this while ingestion is healthy and processor lag is under 30s, and waits one heartbeat window after a platform outage, so the platform's own downtime never causes an offline storm (FR-20). A device that reports again is marked online by the normal processing flow.
 
 ### 3.5 Reads
 
@@ -105,21 +105,21 @@ Current status is read from Redis, falling back to PostgreSQL on a miss or if Re
 |---|---|
 | No acknowledged event lost | Acknowledge after a Kafka write confirmed by two of three replicas |
 | Per-device order | Device ID as partition key |
-| Safe duplicates | Telemetry insert ignores a repeated device and sequence; status applies only a higher sequence |
+| Safe duplicates | A Redis duplicate key skips repeated telemetry rows; status applies only a higher `(bootId, sequence)` key |
 | Failure isolation | Retry and dead-letter topics keep a bad event from blocking its partition |
 | Fairness | Rate limits per device and per tenant at the gateway |
-| Back-pressure | Kafka absorbs bursts; consumer lag is the scaling signal |
+| Back-pressure | Kafka absorbs bursts; the gateway caps in-flight writes and sheds with 503; consumer lag is the scaling signal |
 
 ## 5. Scaling
 
 - **Gateway and status API:** stateless, scaled on CPU and request rate.
 - **Processor:** scaled on consumer lag, up to one instance per partition. The partition count therefore sets the ceiling and is fixed in Phase 2.
-- **PostgreSQL:** the likely first bottleneck. Mitigations are batched writes, time-partitioned telemetry, and read replicas for the query API.
+- **PostgreSQL:** the likely first bottleneck. Mitigations are batched writes, time-partitioned telemetry, and read replicas for the query API. At full scale, telemetry moves to TimescaleDB (see data.md).
 - **Redis:** a single node suffices locally; clustered at full scale.
 
 ## 6. Multi-region design
 
-Each region runs the full stack. Devices reach the nearest healthy region. `telemetry.raw` is replicated in both directions between regions, so each region's processor handles both its own and the other region's events. Because status updates depend only on the sequence number, both regions arrive at the same status for every device without replicating the database. If a region fails, devices resend unacknowledged events to the surviving region.
+Each region runs the full stack. Devices reach the nearest healthy region. `telemetry.raw` is replicated in both directions between regions, so each region's processor handles both its own and the other region's events. Because status updates depend only on the `(bootId, sequence)` key, both regions arrive at the same status for every device without replicating the database. If a region fails, devices resend unacknowledged events to the surviving region. Only a device's home region marks it offline, so replication lag cannot cause a false offline elsewhere; the surviving region takes over offline marking after one heartbeat window.
 
 This is designed here and simulated locally in Phase 6.
 
@@ -143,6 +143,6 @@ Failure drills that need three brokers add about 2 GB.
 2. Message format in Kafka: JSON, Avro, or Protobuf, and whether to run a schema registry
 3. Rate-limit algorithm and how to avoid a Redis call per event
 4. Batch sizes and commit strategy in the processor
-5. Whether a separate Redis duplicate check is needed, given the database already rejects duplicates
+5. Sizing of the Redis duplicate keys at full scale (the check itself is decided in ADR-006)
 6. Device authentication method
 7. API contracts for all three public interfaces
