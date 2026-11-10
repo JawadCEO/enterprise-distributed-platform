@@ -1,12 +1,12 @@
 # iot-telemetry-pipeline: Open Questions
 
-**Status:** closed on 2026-11-04. No answers had arrived when the build started, so each question was settled on its recommended option. The **[assumption, Qn]** markers in the other documents now refer to these decisions. Any of them can still be reopened.
+The domain and the end-to-end picture are agreed: a carrier IoT connectivity platform, described in [how-it-works.md](how-it-works.md). Until a question below is answered, the documents use its recommendation as a working assumption, marked **[assumption, Qn]**.
 
-| # | Question | Decision |
-|---|---|---|
-| 1 | **Tenants.** Do devices belong to tenants, with rate limits per tenant as well as per device? | Yes |
-| 2 | **Offline detection (FR-13).** Should the platform mark devices offline when heartbeats stop? | Yes, with the outage guard in FR-20 |
-| 3 | **What PostgreSQL stores.** Status changes only, a short raw-event window, or aggregates? | Latest status, status changes for 90 days, and raw telemetry for 48 hours in hourly partitions. Kafka keeps the 7-day raw record for replay. |
-| 4 | **Legacy system.** Build a legacy poller and a cut-over story, or only the new pipeline? | Only the new pipeline; the cut-over is documented in Phase 8 |
-| 5 | **Capacity inputs.** 5 million devices, 500-byte events, 15,000 events/sec average? | Kept: about one event per device every 5.5 minutes |
-| 6 | **Multi-region.** Design and simulate, or design only? | Designed now, simulated with two local clusters in Phase 6 |
+1. **Customers and rate limits.** Lines belong to business customers, and rate limits apply per customer as well as per line. Recommendation: yes.
+2. **Offline alerts.** Report a line offline when it detaches or its keep-alives stop, but not for expected silence (suspended, profile switch) and not line by line during a regional outage. Recommendation: yes.
+3. **What PostgreSQL stores.** Current state for every line; 90 days of history (state changes, attach/detach, requests); 13 months of usage; keep-alives and routine readings only update current state and aren't stored row by row. Kafka keeps 7 days of raw events for replay. Recommendation: yes. The alternative, storing every raw event for 7 days, is about 9 billion rows.
+4. **Legacy poller.** Build only the new platform and document the cut-over (run both, compare, switch). Recommendation: yes.
+5. **Capacity.** 5 million lines, ~500-byte events, 15,000 events/sec on average and 50,000 at peak; laptop pass target 5,000/sec. Recommendation: keep these.
+6. **Multi-region.** Design it fully now and simulate two regions locally in Phase 6. Recommendation: yes.
+7. **Remote profile switch (Flow E).** Include it as P2, built only if time allows. Recommendation: yes, P2.
+8. **Two PoCs before Phase 0 closes.** Polling vs push (requests/sec, detection delay) and HTTP vs MQTT ingestion (throughput per core, behaviour when 10% of devices disconnect at once). Recommendation: yes.

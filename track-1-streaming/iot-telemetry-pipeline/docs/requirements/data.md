@@ -1,233 +1,148 @@
 # iot-telemetry-pipeline: Data and Flow
 
-**Status:** draft for discussion. Items marked **[assumption, Qn]** follow the recommended answer to open question n in [open-questions.md](open-questions.md). Items marked **[assumption]** are sizing choices to confirm later.
-
-This document covers what the system receives, what it does with it, what it stores, and what it gives back.
+**Status:** draft for review. Items marked **[assumption, Qn]** follow the recommended answer to open question n in [open-questions.md](open-questions.md); **[assumption]** marks sizing choices to confirm later. Example payloads and one tracker's day are in [real-time-data.md](real-time-data.md).
 
 ## 1. Flow at a glance
 
 ```mermaid
 flowchart LR
-    DEV[Device] -->|1. POST batch of events| GW[ingestion-gateway]
-    GW -->|2. per-event result| DEV
-    GW -->|produce, key = deviceId| RAW[[telemetry.raw]]
-    RAW --> PROC[telemetry-processor]
-    PROC -->|telemetry row, status upsert, status change| PG[(PostgreSQL)]
-    PROC -->|duplicate keys, status cache, last seen| REDIS[(Redis)]
-    PROC -->|temporary failure| RETRY[[telemetry.retry.5s / 1m / 10m]]
-    RETRY --> PROC
-    PROC -->|permanent failure| DLQ[[telemetry.dlq]]
-    DLQ --> DLS[dead-letter-service] --> PG
-    PROC -->|real change| CHG[[device.status-changed]]
-    PRES[presence-monitor] -->|scan last seen| REDIS
-    PRES -->|offline| CHG
-    CLIENT[Tenant system] -->|3. query| API[device-status-api]
-    API --> REDIS
+    NET[Network and devices<br/>simulated] -->|events| ING[event-ingest]
+    CUS[Customer systems] -->|requests, queries| API[customer-api]
+    ING -->|key = lineId| EV[[network.events]]
+    API -->|key = lineId| CMD[[line.commands]]
+    EV --> SP[state-processor]
+    CMD --> PW[provisioning-worker]
+    PW -->|carry out| NET
+    NET -->|PROVISIONING_RESULT| ING
+    SP --> PG[(PostgreSQL)]
+    SP --> RD[(Redis)]
+    SP --> CHG[[line.changes]]
+    PM[presence-monitor] -->|scan last seen| RD
+    PM --> CHG
+    CHG --> NT[notifier]
+    NT -->|signed webhooks| CUS
+    API --> RD
     API --> PG
-    CHG -->|4. change notifications| CONSUMERS[Downstream consumers]
 ```
 
-The system returns four things: (1) an acknowledgement per event to the device, (2) current status and history to API callers, (3) status-change events to downstream consumers, and (4) dead-letter records to operators.
+## 2. What comes in
 
-## 2. What we receive
+### 2.1 Events from the network and devices
 
-### 2.1 Device to gateway
-
-`POST /v1/events`. The device is authenticated by its credentials; the authentication method is decided in Phase 4.
-
-```json
-{
-  "events": [
-    {
-      "eventId": "6f1c2a9e-4b7d-4f1a-9c3e-2d8b5a7e1f40",
-      "deviceId": "dev-000123456",
-      "bootId": 17,
-      "sequence": 98231,
-      "deviceTime": "2026-10-19T14:03:22.418Z",
-      "type": "TELEMETRY",
-      "metrics": {
-        "batteryPct": 81,
-        "signalDbm": -71,
-        "temperatureC": 36.4,
-        "firmware": "4.2.1"
-      }
-    }
-  ]
-}
-```
+`POST /v1/events`, a batch of up to 100 events or 256 KB **[assumption]**. Every event uses one envelope:
 
 | Field | Rule |
 |---|---|
-| `eventId` | UUID created by the device; used for tracing |
-| `deviceId` | Must match the authenticated device. The tenant comes from the registry, never from the payload. |
-| `bootId` | A counter the device increases on every restart and keeps across power loss |
-| `sequence` | A counter that increases within one boot and may restart at 0 after a reboot. `(bootId, sequence)` is the ordering and duplicate key (ADR-005, ADR-006). |
-| `deviceTime` | Recorded but not trusted for ordering. Rejected if more than 24 hours in the future **[assumption]**. |
-| `type` | `TELEMETRY`, `STATUS`, or `HEARTBEAT` |
-| `metrics` | A flat map of known metric names; unknown names are ignored. Up to 4 KB per event **[assumption]**. A `STATUS` event may carry `faultCode`. |
+| `eventId` | UUID (v7 recommended) made by the sender; the duplicate key |
+| `type` | `DEVICE_ATTACHED`, `DEVICE_DETACHED`, `DEVICE_STATUS`, `KEEP_ALIVE`, `USAGE_RECORD`, `IMEI_CHANGED`, `PROVISIONING_RESULT` |
+| `lineId` | The SIM's ICCID. Must be a registered, non-deactivated line. The customer comes from the registry, never from the payload |
+| `imei` | The device the SIM is in right now |
+| `bootId` | Device boot counter, increases on every restart (device events only) |
+| `sequence` | Per-device counter within a boot (device events only) |
+| `deviceTime` | Recorded, never used for ordering. Rejected if more than 24 h in the future **[assumption]** |
+| `payload` | Type-specific, up to 4 KB **[assumption]** |
 
-Batch limits: up to 100 events or 256 KB **[assumption]**.
+Network-originated events (`DEVICE_ATTACHED`, `DEVICE_DETACHED`, `USAGE_RECORD`, `IMEI_CHANGED`, `PROVISIONING_RESULT`) carry the network's own timestamp and no `bootId`/`sequence`; they're ordered by network time per line.
 
-The device contract (FR-22): buffer events until acknowledged, resend with backoff on 503 or timeout, honour `Retry-After`, and keep `bootId` and `sequence` as above.
+### 2.2 Requests from customers
 
-### 2.2 Operators and tenant systems
-
-- Device and tenant registration and updates, through `device-status-api`
-- Dead-letter replay requests, through `dead-letter-service`
-
-## 3. Status model
-
-| Status | Meaning | Entered when |
+| Request | Endpoint | Allowed from line state |
 |---|---|---|
-| `ONLINE` | Reporting normally | Any event arrives and no other rule applies |
-| `DEGRADED` | Reporting, but in poor health | `batteryPct` < 15 or `signalDbm` < -110 **[assumption]** |
-| `FAULT` | The device reports a fault | A `STATUS` event carries a `faultCode`; cleared by a `STATUS` event without one |
-| `OFFLINE` | Silent past its heartbeat window | `presence-monitor` finds no event within the window plus 30s (FR-13, FR-20) |
+| Activate | `POST /v1/lines/{iccid}/activate` | `INVENTORY` (embedded/integrated: profile downloaded first) |
+| Suspend | `POST /v1/lines/{iccid}/suspend` | `ACTIVE` |
+| Restore | `POST /v1/lines/{iccid}/restore` | `SUSPENDED` |
+| Deactivate | `POST /v1/lines/{iccid}/deactivate` | `ACTIVE`, `SUSPENDED` |
+| Switch profile (P2) | `POST /v1/lines/{iccid}/profile` | `ACTIVE`, `INVENTORY`; embedded/integrated only |
+| Bulk job (P1) | `POST /v1/jobs` with an action and up to 50,000 ICCIDs | Per line, as above |
+| Subscribe | `PUT /v1/webhooks` | Any |
 
-Precedence when several rules apply: `FAULT`, then `DEGRADED`, then `ONLINE`. Any event from an `OFFLINE` device moves it out of `OFFLINE`. Each change is recorded with a cause: `EVENT`, `THRESHOLD`, `FAULT_REPORTED`, `FAULT_CLEARED`, `HEARTBEAT_MISSED`, or `REBOOT` (a higher `bootId` arrived).
+Every request carries an `Idempotency-Key`.
 
-Default heartbeat windows by device type **[assumption]**: tracker 60s, meter 15 min, sensor 5 min. A device can override its type's default.
+## 3. How an event is processed
 
-## 4. How it is processed
-
-| Stage | Input | Checks and actions | Writes | On failure |
+| Stage | Where | Checks and actions | Writes | On failure |
 |---|---|---|---|---|
-| 1. Gateway | HTTP batch | Authenticate; look up the device in a local registry cache (no database call per event); reject unknown or inactive devices; check size and shape; check the device and tenant rate limits | Redis rate-limit counters | 401, 403, 400 per event, 429 with `Retry-After` |
-| 2. Publish | Valid events | Add `receivedAt` and `tenantId`; produce keyed by device ID; wait for 2 of 3 replicas; cap in-flight requests (NFR-24) | `telemetry.raw` | 503; the device resends |
-| 3. Validate | Event from Kafka | Device is still active (covers deactivation after the ack) | None | Permanent: send to `telemetry.dlq` |
-| 4. De-duplicate | Valid event | Set the Redis key `(deviceId, bootId, sequence)` if absent, TTL 24h. If it was already present, skip stage 5 and go to stage 6 | Redis duplicate key | Redis down: continue; the per-partition unique constraint still catches same-hour repeats |
-| 5. Store telemetry | New event | Insert the row | `telemetry` (hourly partitions) | Temporary: send to a retry tier |
-| 6. Update status | Event | Apply only if `(bootId, sequence)` is higher than the stored key; derive status from the status model | `device_status`, and `status_change` if the status changed | Temporary: send to a retry tier |
-| 7. Cache | Applied status | Refresh the cached status and last-seen time, after the database write | Redis | Logged; reads fall back to PostgreSQL |
-| 8. Notify | Real change | Publish the change event | `device.status-changed` | Retried with the batch |
-| 9. Commit | Batch done | Commit the Kafka offset after stages 4 to 8 | Kafka offsets | Batch reprocessed; idempotent |
-| Presence | Every 10s **[assumption]** | If ingestion is healthy and lag is under 30s, find home-region devices past their window plus 30s | `device_status`, `status_change`, change event | Paused during a platform outage; resumes one heartbeat window after recovery |
+| 1. Accept | event-ingest | Authenticate the sender; check shape and size; known, non-deactivated line; rate limit per customer | Redis rate counters | `401`, `400`/`UNKNOWN_LINE`/`INACTIVE_LINE` per event, `429` with `Retry-After` |
+| 2. Publish | event-ingest | Add `receivedAt` and `customerId`; produce keyed by line; wait for 2 of 3 replicas | `network.events` | `503`; sender resends |
+| 3. Duplicate check | state-processor | `eventId` seen in the last 48 h? (ADR-006) | Redis `SET NX` with 48 h TTL | Seen: drop. Redis down: fall back to database keys |
+| 4. Order check | state-processor | `(bootId, sequence)` or network time newer than stored? (ADR-005) | None | Older: record in history if relevant, never overwrite state |
+| 5. Apply | state-processor | Update current state; add to usage total (usage is keyed by `eventId`, so a repeat is a no-op); detect IMEI change; resolve a pending request on `PROVISIONING_RESULT` | `line_state`, `device_state`, `usage_cycle`, `line_history`, `request` | Temporary: retry tier. Permanent: dead letter |
+| 6. Cache | state-processor | Refresh cached state and last-seen time | Redis | Logged; reads fall back to PostgreSQL |
+| 7. Publish change | state-processor | Only on a real change worth telling: online/offline, threshold crossed, SIM moved, request done | `line.changes` (written in the same transaction as the state, via an outbox) | Retried with the batch |
+| 8. Commit | state-processor | Commit the offset after stages 3 to 7 | Kafka offsets | Batch reprocessed; idempotent |
 
-Timestamps carried on every event: `deviceTime` (from the device), `receivedAt` (gateway), and `processedAt` (processor). Freshness latency (NFR-2) is measured from `receivedAt` until the status is readable.
+## 4. How a request is processed
 
-## 5. What we give back
-
-### 5.1 Acknowledgement to the device
-
-```json
-{
-  "results": [
-    { "sequence": 98231, "status": "ACCEPTED" },
-    { "sequence": 98232, "status": "REJECTED", "code": "INVALID_METRIC_TYPE" },
-    { "sequence": 98233, "status": "RATE_LIMITED", "retryAfterMs": 2000 }
-  ]
-}
-```
-
-The device drops accepted events from its buffer and resends anything else after the given delay. A request from an unknown or deactivated device gets 403 for the whole batch.
-
-### 5.2 Status API
-
-| Query | Endpoint | Source |
-|---|---|---|
-| Current status of a device | `GET /v1/devices/{id}/status` | Redis, falling back to PostgreSQL |
-| Recent history of a device | `GET /v1/devices/{id}/history?from=&to=&cursor=` | PostgreSQL `telemetry` (48h) and `status_change` (90d) |
-| Devices by status | `GET /v1/devices?status=OFFLINE&cursor=` | PostgreSQL `device_status`, scoped to the caller's tenant |
-
-```json
-{
-  "deviceId": "dev-000123456",
-  "status": "ONLINE",
-  "bootId": 17,
-  "lastSequence": 98231,
-  "lastSeen": "2026-10-19T14:03:22.431Z",
-  "metrics": { "batteryPct": 81, "signalDbm": -71, "temperatureC": 36.4, "firmware": "4.2.1" }
-}
-```
-
-### 5.3 Status-change event
-
-```json
-{
-  "deviceId": "dev-000123456",
-  "tenantId": "tenant-042",
-  "from": "ONLINE",
-  "to": "OFFLINE",
-  "cause": "HEARTBEAT_MISSED",
-  "bootId": 17,
-  "sequence": 98231,
-  "changedAt": "2026-10-19T14:12:00.000Z"
-}
-```
-
-### 5.4 Dead-letter records
-
-Listed and replayed by operators: original event, failure reason, attempt count, and first and last failure times. A replayed event older than the telemetry retention updates status only (FR-12).
-
-## 6. What is stored
-
-| Data | Store | Key | Description |
+| Stage | Where | Checks and actions | On failure |
 |---|---|---|---|
-| Tenant | PostgreSQL | tenant ID | Name and rate limit **[assumption, Q1]** |
-| Device type | PostgreSQL | type | Default heartbeat window and status thresholds |
-| Device | PostgreSQL | device ID | Tenant, type, firmware, heartbeat override, home region, active flag, credential hash |
-| Telemetry | PostgreSQL, hourly partitions | device ID, boot ID, sequence (unique within a partition) | Raw events for 48 hours **[assumption, Q3]** |
-| Device status | PostgreSQL and Redis | device ID | One row per device: status, last `(bootId, sequence)`, last seen, latest metrics |
-| Status change | PostgreSQL, monthly partitions | device ID and time | Old status, new status, cause |
-| Dead-letter record | PostgreSQL | record ID | Original event, reason, attempts, failure times |
-| Duplicate keys | Redis | device ID, boot ID, sequence | TTL 24 hours (ADR-006) |
-| Last seen | Redis sorted set | device ID, scored by time | Used by `presence-monitor` |
-| Rate-limit counters | Redis | device or tenant plus window | Short-lived |
-| Raw event log | Kafka | partitioned by device ID | Source of truth for replay |
+| 1. Validate | customer-api | In order: credentials, line belongs to caller, rate limit, idempotency key, state allows the action, no request in progress, account in good standing | `401`, `404`, `429`, original answer, `409 INVALID_STATE`, `409 REQUEST_IN_PROGRESS`, `403 ACCOUNT_BLOCKED` |
+| 2. Accept | customer-api | Write `request` (`PENDING`), set line `PENDING`, produce to `line.commands` in one step (outbox) | `503`; nothing changed |
+| 3. Carry out | provisioning-worker | Call the network; retry with back-off; pace bulk jobs | Time limit (2 min **[assumption]**) → `FAILED NETWORK_TIMEOUT`, line back to previous state |
+| 4. Confirm | state-processor | `PROVISIONING_RESULT` arrives: `DONE` → new line state, request `COMPLETED`; `REJECTED` → previous state, request `FAILED` with the network's reason | |
+| 5. Notify | notifier | Webhook: request completed or failed | Retry, then park |
 
-**Full-scale path for telemetry:** 2.6 billion rows in plain PostgreSQL is a stretch for one primary. At full scale, telemetry would move to TimescaleDB, a PostgreSQL extension that keeps the same SQL and adds hypertables, built-in retention, and compression. The laptop build uses plain PostgreSQL with hourly partitions, and the schema is kept compatible with a later switch.
+A sweeper fails any request still `PENDING` past its time limit, so a worker killed mid-request can't leave a line stuck (FR-8).
 
-## 7. Volume
+## 5. State models
 
-Inputs are **[assumption, Q5]** until confirmed.
+### Line state
 
-| Input | Value |
-|---|---|
-| Devices | 5 million |
-| Peak rate | 50,000 events/sec |
-| Average rate | 15,000 events/sec, about one event per device every 5.5 minutes |
-| Event size | 500 bytes as JSON |
+| From | Action or event | To |
+|---|---|---|
+| `INVENTORY` | activate accepted | `PENDING` → `ACTIVE` on `DONE` |
+| `ACTIVE` | suspend accepted | `PENDING` → `SUSPENDED` on `DONE` |
+| `SUSPENDED` | restore accepted | `PENDING` → `ACTIVE` on `DONE` |
+| `ACTIVE`, `SUSPENDED` | deactivate accepted | `PENDING` → `DEACTIVATED` on `DONE` |
+| `PENDING` | `REJECTED` or time limit | back to the state before the request |
+| `ACTIVE` | `IMEI_CHANGED` on an embedded/integrated SIM, customer opted in to auto-suspend | `SUSPENDED` |
 
-| Derived figure | Value |
-|---|---|
-| Peak ingress | 25 MB/sec |
-| Events per day | about 1.3 billion |
-| Raw data per day | about 650 GB before compression |
-| Kafka, 7 days, 3 copies | about 13.6 TB before compression |
-| PostgreSQL telemetry, 48 hours | about 2.6 billion rows, roughly 1.3 TB before indexes |
-| Redis duplicate keys, 24 hours | about 1.3 billion keys at full scale; sized in Phase 1, small at laptop scale |
-| Latest-status rows | 5 million |
+`DEACTIVATED` is final.
 
-## 8. Retention
+### Connection state
 
-| Data | Retention |
-|---|---|
-| Raw events in Kafka | 7 days |
-| Telemetry in PostgreSQL | 48 hours **[assumption, Q3]** |
-| Device status | Kept while the device is registered |
-| Status changes | 90 days **[assumption, Q3]** |
-| Dead-letter records | 30 days **[assumption]** |
-| Duplicate keys | 24 hours |
-| Rate-limit counters | Seconds to minutes |
+| From | Event | To | Notify? |
+|---|---|---|---|
+| `OFFLINE` | any device event or `DEVICE_ATTACHED` | `ONLINE` | Yes, unless recovering from an outage notice |
+| `ONLINE` | `DEVICE_DETACHED` | `OFFLINE` (`DETACHED`) | Only if the line is `ACTIVE` and no profile switch is in progress |
+| `ONLINE` | no event within keep-alive window + 30 s | `OFFLINE` (`KEEP_ALIVE_MISSED`) | Same rule; suppressed during an outage notice (FR-21) |
 
-## 9. Sensitivity
+Default keep-alive windows: trackers 5 min, meters 60 min, fridge sensors 15 min **[assumption]**.
 
-Low. The data is device and tenant identifiers plus technical metrics, with no personal data. Device credentials are the only secrets and are stored only as hashes.
+## 6. What we store, and why
 
-## 10. Data source: `device-simulator`
+Each store serves one of the seven purposes in [how-it-works.md](how-it-works.md#4b-what-we-do-with-the-data). Nothing is kept without one.
 
-All data is synthetic. No public dataset has millions of devices, per-device ordering keys, or faults on demand, and the drills need all three.
+| Store | Contents | Purpose | Kept for |
+|---|---|---|---|
+| PostgreSQL `customer`, `line`, `webhook` | Registry: customer, line, SIM type, plan, keep-alive window, endpoints | All | While active |
+| PostgreSQL `line_state` + `device_state` | One row per line: line state, connection, last seen, battery, signal, firmware, IMEI, last `(bootId, sequence)` | 1. Current state | Always |
+| PostgreSQL `line_history` | State changes, attach/detach, requests, SIM moves (daily partitions) | 4. Support history | 90 days **[assumption, Q3]** |
+| PostgreSQL `usage_cycle` + `usage_record` | Running total per line per cycle; each usage record keyed by `eventId` | 3. Metering | 13 months |
+| PostgreSQL `request`, `job` | Every request and bulk job with its outcome | 2, 4 | 90 days |
+| PostgreSQL `notification` | Every webhook with delivery attempts | 2. Notifications | 30 days |
+| PostgreSQL `security_event` | SIM moves with severity | 6. Security | 1 year |
+| PostgreSQL `fleet_minute` | Per customer, region, model: lines online/offline, requests failed | 5. Fleet health | 90 days |
+| PostgreSQL `dead_letter` | Unprocessable events with reason | Operations | 30 days |
+| Redis | Rate counters, duplicate keys (48 h), state cache, last-seen sorted set | Speed | Short-lived |
+| Kafka `network.events` | Every event as received | 7. Replay | 7 days |
 
-| Capability | Details |
-|---|---|
-| Fleet model | N devices across tenants and device types. Tenant sizes are skewed, with a few large tenants. |
-| Realistic metrics | Battery drains slowly and resets on recharge; signal is noisy around a per-device baseline; temperature follows a daily cycle; firmware changes occasionally |
-| Traffic shape | A daily curve with a peak of about 3.3x the average, plus bursts such as a whole tenant reconnecting at once |
-| Device lifecycle | Online, silent periods (to trigger offline), reboot (`bootId` increases, `sequence` resets), deactivation, faults reported and cleared |
-| Fault injection, each with a configurable rate | Duplicates, out-of-order delivery, malformed payloads, unknown devices, clock skew, a noisy tenant at 10x its limit, poison events that fail processing |
-| Device contract | Implements FR-22 exactly: buffering, resend with backoff, `Retry-After` |
-| Acknowledgement ledger | Records every acknowledged event, so the drills can reconcile against the database (NFR-6) |
-| Reproducibility | A fixed random seed and named scenarios: `steady`, `peak`, `reboot-storm`, `broker-kill`, `gateway-outage`, `noisy-tenant` |
-| Laptop scaling | Shorter heartbeat intervals reach a high event rate with fewer devices, for example 50,000 devices at a 10s interval for 5,000 events/sec |
+Keep-alives and routine status readings are **not** stored row by row: they only update current state and last seen. That's what keeps PostgreSQL to about 10M history rows a day instead of 1.3 billion **[assumption, Q3]**.
 
-**Optional replay mode.** For realistic metric shapes, the simulator can replay a public dataset as metric input: the Intel Berkeley Research Lab sensor data (54 sensors, real gaps and battery decline) or the Kaggle Environmental Sensor Telemetry Data (3 devices, clean environmental readings). Datasets are downloaded at run time, not stored in the repository, and their licences are checked first.
+## 7. What we give back
+
+| To | What | How |
+|---|---|---|
+| Device / network | Per-event result: `ACCEPTED`, `REJECTED` with code, `RATE_LIMITED` with delay | Response to `POST /v1/events` |
+| Customer | `202` with `requestId` for each request | Response |
+| Customer | Webhooks: request completed/failed, device offline/online, usage 80%/100%, SIM moved, outage/recovery, bulk job summary | Signed `POST` to their endpoint, with `notificationId` |
+| Customer | Line state, history, request status, line lists | `customer-api` |
+| Billing system | Usage totals per line per cycle | Out of scope; exposed as a table and topic |
+| Operators | Dead letters, fleet health | Ops endpoints and dashboards |
+
+## 8. Volume
+
+At 5M lines **[assumption, Q5]**: ~15,000 events/s on average and ~50,000/s at peak (breakdown in [real-time-data.md](real-time-data.md#1-where-it-comes-from-and-how-fast)). About 1.3 billion events a day reach Kafka (~650 GB/day at 500 bytes); about 10 million history rows and a few hundred thousand notifications a day reach PostgreSQL.
+
+## 9. Simulator
+
+`network-simulator` plays the network, the devices and the provisioning system. It must produce every event type for all three SIM types, keep a ledger of every acknowledged event and every byte of usage for reconciliation, answer provisioning requests with a configurable delay and failure rate, and inject the faults listed in [real-time-data.md](real-time-data.md#4-the-messy-parts-the-simulator-must-produce) on demand.

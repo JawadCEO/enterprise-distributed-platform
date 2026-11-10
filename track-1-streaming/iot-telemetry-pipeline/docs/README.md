@@ -1,11 +1,15 @@
 # iot-telemetry-pipeline
 
-**Status:** draft for discussion. No code yet.
+**Status:** draft for review. No code yet.
+
+A mobile carrier's IoT connectivity platform (like Verizon ThingSpace): millions of SIM-connected trackers, meters and sensors for business customers. Start with [how it works](requirements/how-it-works.md).
 
 ## Documents
 
 | Document |
 |---|
+| [How it works: actors, flows, SIM types, what we do with the data](requirements/how-it-works.md) |
+| [What the real-time data looks like](requirements/real-time-data.md) |
 | [Problem statement, goals, users, non-goals](requirements/problem-statement.md) |
 | [Functional requirements](requirements/functional-requirements.md) |
 | [Non-functional requirements and disaster recovery](requirements/non-functional-requirements.md) |
@@ -18,7 +22,7 @@
 
 | Item | Value |
 |---|---|
-| Domain | Ingestion and status processing for millions of IoT devices, replacing legacy polling with an event-driven design |
+| Domain | Telecom: a carrier IoT platform that tracks 5M SIM lines (removable, soldered eSIM, integrated iSIM), carries out customer line requests, and notifies customers by webhook instead of making them poll |
 | Stack | Java, Spring Boot, Apache Kafka, PostgreSQL, Redis, Kubernetes, Docker, OpenTelemetry |
 | Throughput target | 50,000 events/sec at peak |
 | Latency target | p95 < 50ms, p99 < 150ms end to end |
@@ -27,44 +31,46 @@
 
 ## My understanding
 
-The legacy system asks each device for its status on a schedule. That wastes capacity on devices with nothing new and reports changes late. The new system inverts it: devices push events, a gateway accepts them and writes them to Kafka, and downstream consumers validate, de-duplicate, and store them. Bad events go to a dead-letter path instead of blocking the stream, and rate limiting stops one noisy device or tenant from starving the others.
+Today customers poll the carrier to learn whether their devices are online, whether their requests went through, and how much data they've used. The new platform inverts it: the network and devices push events, customers send requests, and the platform keeps every line's state current and tells customers by webhook when something changes. Bad events go to retry and dead-letter paths instead of blocking the stream, and rate limits stop one customer from slowing the others.
 
 ## What this project demonstrates
 
-- Kafka partitioning and ordering per device
-- At-least-once delivery made safe by idempotent consumers
-- Non-blocking retries and dead-letter handling with replay
-- Distributed rate limiting
-- Back-pressure and behaviour under broker or database failure
+- Kafka partitioning and per-line ordering, including across device reboots
+- At-least-once delivery made safe by idempotent consumers, and usage counted exactly once
+- Long-running requests as state machines with an outbox and a sweeper
+- Webhook delivery with per-customer isolation
+- Non-blocking retries, dead letters and replay
+- Distributed rate limiting and back-pressure
 
-## Preliminary shape (for discussion)
+## Services
 
-**Services: 5, plus a simulator** (see the [high-level design](architecture/high-level-design.md#2-services))
+**Six services plus a simulator** (see the [high-level design](architecture/high-level-design.md#2-services))
 
 | Service | Responsibility |
 |---|---|
-| `ingestion-gateway` | Accepts device events, authenticates, rate limits (Redis), publishes to Kafka |
-| `telemetry-processor` | Validates, de-duplicates, writes telemetry and latest status, runs the retry tiers |
-| `presence-monitor` | Marks devices offline when their heartbeat window passes |
-| `dead-letter-service` | Stores events that ran out of retries; supports inspection and replay |
-| `device-status-api` | Device registry; current status and history queries |
-| `device-simulator` | Test tool that generates device traffic, including bad and duplicate events |
+| `event-ingest` | Accepts network and device events, authenticates, rate limits, publishes to Kafka |
+| `customer-api` | Customer line requests, queries, webhook subscriptions |
+| `state-processor` | Applies events to line, device and usage state, in order, without duplicates |
+| `presence-monitor` | Marks lines offline when keep-alives stop; outage guard |
+| `provisioning-worker` | Carries out line changes against the network |
+| `notifier` | Delivers webhooks with retries |
+| `network-simulator` | Test tool: network, devices and provisioning, with faults on demand |
 
 **Data stores**
 
-- PostgreSQL: device registry, time-partitioned telemetry, latest status per device, dead-letter records
-- Redis: rate-limit counters, de-duplication keys, latest-status cache
-- Kafka: raw events, validated events, tiered retry topics, dead-letter topic
+- PostgreSQL: registry, current line state, 90-day history, usage, requests, notifications, dead letters
+- Redis: rate-limit counters, duplicate keys, state cache, last-seen sorted set
+- Kafka: network events, retry tiers, dead letters, line commands, line changes
 
 ## Phase plan
 
 | Phase | Focus for this project |
 |---|---|
-| 0 | Requirements, ADRs 001 to 005, high-level design. Drafted; closes when the open questions are answered |
-| 1 | Data layer: access patterns, PostgreSQL schema (hourly telemetry partitions and drop job, status upsert guarded by sequence, status changes), Redis key design (status cache, last-seen sorted set, rate-limit counters), key queries, and whether a Redis duplicate check is needed |
-| 2 | Kafka: topic layout including `device.status-changed`, partition key and count for 3x peak, message format and schema registry, retry tiers, dead-letter and replay, cross-region topic replication design |
-| 3 | Services: API contracts for the three public interfaces, web stack and Java version, processor batch and commit strategy, consumer concurrency, rate-limit algorithm, presence-monitor scan, circuit breakers, and the `device-simulator` with its fault scenarios |
-| 4 | Security: device authentication, tenant isolation on every query, service-to-service trust and TLS, audit log for registry changes and replays |
+| 0 | Domain and how it works, requirements, ADRs 001 to 008, high-level design, and two PoCs (polling vs push, HTTP vs MQTT). Drafted; closes when the open questions are answered and the PoCs are run |
+| 1 | Data layer: access patterns, PostgreSQL schema (registry, line and device state guarded by boot counter and sequence, daily-partitioned history and drop job, usage keyed by event, requests, notifications), Redis key design, key queries |
+| 2 | Kafka: topic layout (`network.events`, `line.commands`, `line.changes`), partition key and count for 3x peak, message format and schema registry, retry tiers, dead-letter and replay, cross-region topic replication design |
+| 3 | Services: API contracts (events, requests, webhooks), web stack and Java version, processor batch and commit strategy, request state machine and sweeper, notifier delivery, rate-limit algorithm, presence-monitor scan and outage guard, and the `network-simulator` with its fault scenarios |
+| 4 | Security: device, network and customer authentication, customer isolation on every query, webhook signing, service-to-service trust and TLS, audit log for registry changes and replays |
 | 5 | Observability: one trace from gateway across Kafka to the database, freshness latency per hop against the 50ms budget, consumer lag, offline-detection lag, dead-letter rate, full-scale cost projection |
 | 6 | Testing and drills: integration tests, broker, database, Redis, and instance kills with reconciliation of every acknowledged event, laptop load benchmark with projection, two-region simulation (run on its own for memory) |
 | 7 | Kubernetes: manifests, lag-based autoscaling for the processor, rolling deploy and one-step rollback |
@@ -72,12 +78,8 @@ The legacy system asks each device for its status on a schedule. That wastes cap
 
 ## Laptop fit (16GB)
 
-Roughly 5GB: one Kafka broker in KRaft mode (three for failure drills), PostgreSQL, Redis, four JVM services with capped heaps, and the simulator. Comfortable.
+Roughly 7GB: one Kafka broker in KRaft mode (three for failure drills), PostgreSQL, Redis, six JVM services with capped heaps, and the simulator. Comfortable.
 
-## Risks and open questions
+## Open questions
 
-1. **Ingestion protocol.** HTTP, MQTT, or both? Real IoT fleets mostly use MQTT. HTTP is simpler to build and load test. Recommendation: HTTP first, with the gateway designed so an MQTT adapter can be added.
-2. **RPO = 0 across regions conflicts with the latency target.** Zero loss across regions needs synchronous cross-region replication, which adds tens of milliseconds per write. We must pick: zero loss within a region and near-zero across regions, or relax the latency target.
-3. **Multi-region active-active cannot be run on a laptop.** Recommendation: design it fully in the documents and, at most, simulate two regions with two local clusters and replication.
-4. **Legacy side.** Do we model the legacy poller (for a migration and cut-over story), or only the new pipeline?
-5. **50,000 events/sec is a design target.** The laptop figure will be lower and reported as measured, with a projection.
+See [open-questions.md](requirements/open-questions.md). The domain and end-to-end picture are agreed; the remaining questions confirm scope and sizing.
