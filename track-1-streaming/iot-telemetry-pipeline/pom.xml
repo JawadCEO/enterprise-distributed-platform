@@ -24,6 +24,7 @@
         <module>state-processor</module>
         <module>presence-monitor</module>
         <module>customer-api</module>
+        <module>provisioning-worker</module>
         <module>network-simulator</module>
     </modules>
 

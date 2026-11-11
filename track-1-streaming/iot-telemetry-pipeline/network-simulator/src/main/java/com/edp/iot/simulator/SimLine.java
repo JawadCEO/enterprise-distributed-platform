@@ -34,6 +34,8 @@ final class SimLine {
      */
     static final long RUN_BOOT_BASE = Instant.now().getEpochSecond();
 
+    /** The line state as the simulator last learned it from customer-api; only live lines send events. */
+    volatile String lineState = "ACTIVE";
     String imei;
     long bootId = RUN_BOOT_BASE;
     long sequence;
@@ -61,6 +63,11 @@ final class SimLine {
         this.noisy = noisy;
         this.battery = 40 + random.nextDouble() * 60;
         this.signalBaseline = -60 - random.nextDouble() * 40;
+    }
+
+    boolean live() {
+        String s = lineState;
+        return s.equals("ACTIVE") || s.equals("SUSPENDED") || s.equals("PENDING");
     }
 
     void reboot() {

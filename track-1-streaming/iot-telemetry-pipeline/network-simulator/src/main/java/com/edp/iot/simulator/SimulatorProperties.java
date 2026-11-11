@@ -11,6 +11,9 @@ import java.time.Duration;
  */
 @ConfigurationProperties("iot.sim")
 public record SimulatorProperties(
+        /* traffic: import lines, send events and requests, reconcile. network: run the simulated
+           carrier network's provisioning interface until stopped. */
+        @DefaultValue("traffic") String mode,
         @DefaultValue("http://localhost:8080") String ingestUrl,
         @DefaultValue("http://localhost:8084") String apiUrl,
         /* Operator API key, used to import the simulated lines and to read them back for reconciliation. */
@@ -41,5 +44,22 @@ public record SimulatorProperties(
         @DefaultValue("0.0005") double silenceRate,
         @DefaultValue("0.0005") double detachRate,
         @DefaultValue("0.0002") double simMoveRate,
-        @DefaultValue("1") int noisyCustomerMultiplier) {
+        @DefaultValue("1") int noisyCustomerMultiplier,
+        /* Customer requests per second across all lines (0 turns them off). */
+        @DefaultValue("2") double requestRate,
+        @DefaultValue("0.05") double duplicateRequestRate,
+        @DefaultValue("0.05") double conflictingRequestRate,
+        @DefaultValue("0.03") double invalidRequestRate,
+        @DefaultValue("0.02") double deactivateShare,
+        /* Share of lines imported as INVENTORY, waiting for an activate request. */
+        @DefaultValue("0.05") double inventoryShare,
+        /* How long to wait at the end for every request to finish: the request time limit plus margin. */
+        @DefaultValue("180s") Duration requestWait,
+        /* The simulated network (network mode serves it; traffic mode reads its ledger). */
+        @DefaultValue("http://localhost:8090") String networkUrl,
+        @DefaultValue("8090") int networkPort,
+        @DefaultValue("1s") Duration networkLatency,
+        @DefaultValue("0.05") double networkRejectRate,
+        @DefaultValue("0.05") double networkUnavailableRate,
+        @DefaultValue("0.01") double networkDropRate) {
 }

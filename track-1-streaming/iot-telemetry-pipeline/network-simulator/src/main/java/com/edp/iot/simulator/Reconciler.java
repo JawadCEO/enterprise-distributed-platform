@@ -24,7 +24,7 @@ final class Reconciler {
 
     private static final Logger log = LoggerFactory.getLogger(Reconciler.class);
 
-    record Usage(String cycleStart, long bytesUsed) {
+    record Usage(String cycleStart, long bytesUsed, String lineState) {
     }
 
     record Report(int lines, int matched, int short_, int over, int uncertain, int skipped, long ledgerBytes,
@@ -53,8 +53,10 @@ final class Reconciler {
                     .whenComplete((response, error) -> {
                         concurrency.release();
                         if (error == null && response.statusCode() == 200) {
-                            JsonNode usage = Jsons.read(response.body()).path("usage");
-                            out.put(line.iccid, new Usage(usage.path("cycleStart").asText(), usage.path("bytesUsed").asLong()));
+                            JsonNode body = Jsons.read(response.body());
+                            JsonNode usage = body.path("usage");
+                            out.put(line.iccid, new Usage(usage.path("cycleStart").asText(), usage.path("bytesUsed").asLong(),
+                                    body.path("lineState").asText()));
                         }
                     }));
         }
@@ -113,10 +115,13 @@ final class Reconciler {
         return a == null || b == null ? -1 : a.bytesUsed() - b.bytesUsed();
     }
 
-    /** No reading, or the billing cycle rolled over during the run, so the two readings don't compare. */
+    /**
+     * No reading; the billing cycle rolled over during the run; or the line was deactivated, after
+     * which usage the ingest cache still accepted is dead-lettered, not billed. Those don't compare.
+     */
     private static boolean skipped(Map<String, Usage> before, Map<String, Usage> after, String iccid) {
         Usage a = after.get(iccid);
         Usage b = before.get(iccid);
-        return b == null || (a != null && !a.cycleStart().equals(b.cycleStart()));
+        return b == null || (a != null && (!a.cycleStart().equals(b.cycleStart()) || "DEACTIVATED".equals(a.lineState())));
     }
 }

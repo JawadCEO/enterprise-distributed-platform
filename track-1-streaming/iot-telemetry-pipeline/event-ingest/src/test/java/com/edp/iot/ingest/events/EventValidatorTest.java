@@ -48,6 +48,26 @@ class EventValidatorTest {
     }
 
     @Test
+    void provisioningResultNeedsRequestIdAndOutcome() {
+        var outcome = validator.validate(node("""
+                {"eventId":"6f1c2a9e-4b7d-4f1a-9c3e-2d8b5a7e1f40","type":"PROVISIONING_RESULT","lineId":"%s",
+                 "networkTime":"2026-11-10T09:59:00Z",
+                 "payload":{"requestId":"0b6f4b8e-3d2a-4c55-9d7e-8a1f2c3b4d5e","outcome":"REJECTED","reason":"BARRED"}}
+                """.formatted(ICCID)), NOW);
+        assertThat(outcome).isInstanceOf(EventValidator.Valid.class);
+        assertThat(((EventValidator.Valid) outcome).event().payload())
+                .containsEntry("outcome", "REJECTED").containsEntry("reason", "BARRED");
+
+        assertThat(code("""
+                {"eventId":"6f1c2a9e-4b7d-4f1a-9c3e-2d8b5a7e1f40","type":"PROVISIONING_RESULT","lineId":"%s",
+                 "networkTime":"2026-11-10T09:59:00Z","payload":{"requestId":"nope","outcome":"DONE"}}""")).isEqualTo("INVALID_PAYLOAD_FIELD");
+        assertThat(code("""
+                {"eventId":"6f1c2a9e-4b7d-4f1a-9c3e-2d8b5a7e1f40","type":"PROVISIONING_RESULT","lineId":"%s",
+                 "networkTime":"2026-11-10T09:59:00Z",
+                 "payload":{"requestId":"0b6f4b8e-3d2a-4c55-9d7e-8a1f2c3b4d5e","outcome":"MAYBE"}}""")).isEqualTo("INVALID_PAYLOAD_FIELD");
+    }
+
+    @Test
     void rejectsWithMachineReadableCodes() {
         assertThat(code("""
                 {"eventId":"6f1c2a9e-4b7d-4f1a-9c3e-2d8b5a7e1f40","type":"KEEP_ALIVE","lineId":"%s",

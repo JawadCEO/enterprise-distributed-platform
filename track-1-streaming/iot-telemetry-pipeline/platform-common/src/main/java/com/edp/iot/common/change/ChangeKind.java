@@ -16,6 +16,11 @@ public enum ChangeKind {
     /** The SIM appeared in a different device (FR-18). */
     SIM_MOVED,
     LINE_STATE_CHANGED,
+    /** A customer request was accepted and the line went {@code PENDING}. History only. */
+    REQUEST_ACCEPTED,
+    /** A customer request finished; the customer is told either way (FR-23). */
+    REQUEST_COMPLETED,
+    REQUEST_FAILED,
     FAULT_REPORTED,
     FAULT_CLEARED
 }

@@ -35,6 +35,9 @@ public record NetworkEvent(
     public static final String BYTES_UP = "bytesUp";
     public static final String BYTES_DOWN = "bytesDown";
     public static final String REGION = "region";
+    public static final String REQUEST_ID = "requestId";
+    public static final String OUTCOME = "outcome";
+    public static final String REASON = "reason";
 
     public NetworkEvent {
         payload = payload == null ? Map.of() : Map.copyOf(payload);

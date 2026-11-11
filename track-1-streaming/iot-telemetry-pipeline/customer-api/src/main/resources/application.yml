@@ -31,6 +31,12 @@ spring:
         enable.idempotence: true
 
 iot:
+  requests:
+    timeout: ${REQUEST_TIMEOUT:120s}
+    rate-per-second: ${REQUEST_RATE_LIMIT:20}
+    partitions: ${KAFKA_PARTITIONS:12}
+    replication-factor: ${KAFKA_REPLICATION:1}
+    min-insync-replicas: ${KAFKA_MIN_ISR:1}
   security:
     bootstrap-operator-key: ${IOT_OPERATOR_KEY:}
 
