@@ -117,6 +117,9 @@ final class TrafficEngine {
         scheduler.scheduleAtFixedRate(() -> log.info(stats.line((System.currentTimeMillis() - start) / 1000.0)),
                 5, 5, TimeUnit.SECONDS);
         scheduler.scheduleWithFixedDelay(this::flushLedger, 1, 1, TimeUnit.SECONDS);
+        if (props.gatewayBatch() > 100) {
+            throw new IllegalArgumentException("GATEWAY_BATCH must be at most 100, event-ingest's limit per request");
+        }
         if (props.gatewayBatch() > 0) {
             log.info("Gateway mode: up to {} events from many lines per request", props.gatewayBatch());
             scheduler.scheduleWithFixedDelay(this::sendReady, 10, 10, TimeUnit.MILLISECONDS);
