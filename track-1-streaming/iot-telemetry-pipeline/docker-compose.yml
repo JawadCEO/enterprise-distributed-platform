@@ -115,6 +115,7 @@ services:
     <<: *service
     build: { context: ., args: { MODULE: state-processor } }
     image: iot/state-processor
+    mem_limit: 512m
     ports:
       - "18081:8081"
     environment:
