@@ -4,6 +4,8 @@ import com.edp.iot.common.Json;
 import com.edp.iot.common.Topics;
 import com.edp.iot.common.event.NetworkEvent;
 import com.edp.iot.ingest.IngestProperties;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
@@ -26,14 +28,32 @@ public class EventPublisher {
 
     private final KafkaTemplate<String, String> kafka;
     private final IngestProperties props;
+    /** The Kafka hop of the freshness budget: from the first send to the last confirmation (NFR-2, 10 ms). */
+    private final Timer publishTime;
 
-    public EventPublisher(KafkaTemplate<String, String> kafka, IngestProperties props) {
+    public EventPublisher(KafkaTemplate<String, String> kafka, IngestProperties props, MeterRegistry meters) {
         this.kafka = kafka;
         this.props = props;
+        this.publishTime = Timer.builder("iot.ingest.publish")
+                .description("Send to network.events until Kafka confirmed every event of the request")
+                .publishPercentiles(0.5, 0.95, 0.99)
+                .publishPercentileHistogram()
+                .minimumExpectedValue(java.time.Duration.ofMillis(1))
+                .maximumExpectedValue(java.time.Duration.ofSeconds(5))
+                .register(meters);
     }
 
     /** @return one flag per event, true when Kafka confirmed the write in time */
     public boolean[] publish(List<NetworkEvent> events) {
+        long started = System.nanoTime();
+        try {
+            return send(events);
+        } finally {
+            publishTime.record(System.nanoTime() - started, TimeUnit.NANOSECONDS);
+        }
+    }
+
+    private boolean[] send(List<NetworkEvent> events) {
         List<CompletableFuture<?>> futures = new ArrayList<>(events.size());
         for (NetworkEvent event : events) {
             CompletableFuture<?> future;

@@ -88,8 +88,7 @@ class Deliverer {
     private final Object signal = new Object();
     /** Set by {@link #wake()}; a wake that lands while a round is running starts the next round at once. */
     private boolean woken;
-    private final Counter delivered;
-    private final Counter failed;
+    private final MeterRegistry meters;
     private final Counter parked;
     private final Timer latency;
     private volatile boolean running = true;
@@ -113,8 +112,7 @@ class Deliverer {
         this.props = props;
         this.backoff = new Backoff(props.retryInitial(), props.retryMax());
         this.globalSlots = new Semaphore(props.maxInFlight());
-        this.delivered = meters.counter("iot.notifier.delivered");
-        this.failed = meters.counter("iot.notifier.attempts.failed");
+        this.meters = meters;
         this.parked = meters.counter("iot.notifier.parked");
         this.latency = Timer.builder("iot.notifier.latency")
                 .description("From the change to the webhook being accepted by the endpoint (NFR-2a)")
@@ -229,11 +227,11 @@ class Deliverer {
                                lease_until = NULL, last_error = NULL
                          WHERE notification_id = ? AND status = 'PENDING'
                         """, c.notificationId());
-                delivered.increment();
+                meters.counter("iot.notifier.delivered", "customer", endpoint.customerId()).increment();
                 recordLatency(c.payload());
                 healthy(endpoint.webhookId());
             } else {
-                failed.increment();
+                meters.counter("iot.notifier.attempts.failed", "customer", endpoint.customerId()).increment();
                 int failures = c.attempts() + 1;
                 Instant next = Instant.now().plus(backoff.after(failures));
                 boolean park = !next.isBefore(c.retrySince().plus(props.retryFor()));

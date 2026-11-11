@@ -25,6 +25,10 @@ public class StateMetrics {
     private final Counter changes;
     private final Counter usageCounted;
     private final DistributionSummary batchSize;
+    /* The hops of the freshness budget after the gateway (NFR-2 section 2). */
+    private final Timer queue;
+    private final Timer database;
+    private final Timer cache;
 
     public StateMetrics(MeterRegistry registry) {
         this.freshness = Timer.builder("iot.freshness")
@@ -41,7 +45,36 @@ public class StateMetrics {
         this.retried = Counter.builder("iot.state.events").tag("outcome", "retry").register(registry);
         this.changes = Counter.builder("iot.state.line.changes").register(registry);
         this.usageCounted = Counter.builder("iot.state.usage.records").tag("outcome", "counted").register(registry);
+        this.queue = hop(registry, "queue", "event-ingest receive to the processor picking the event up: Kafka produce, fetch and batching");
+        this.database = hop(registry, "database", "one batch's PostgreSQL transaction");
+        this.cache = hop(registry, "cache", "one batch's Redis writes after commit");
         this.batchSize = DistributionSummary.builder("iot.state.batch.size").publishPercentiles(0.5, 0.99).register(registry);
+    }
+
+    private static Timer hop(MeterRegistry registry, String hop, String description) {
+        return Timer.builder("iot.freshness.hop")
+                .tag("hop", hop)
+                .description(description)
+                .publishPercentiles(0.5, 0.95, 0.99)
+                .publishPercentileHistogram()
+                .minimumExpectedValue(Duration.ofMillis(1))
+                .maximumExpectedValue(Duration.ofSeconds(30))
+                .register(registry);
+    }
+
+    void pickedUp(Collection<Instant> receivedAt) {
+        Instant now = Instant.now();
+        for (Instant at : receivedAt) {
+            queue.record(Duration.between(at, now));
+        }
+    }
+
+    Timer database() {
+        return database;
+    }
+
+    Timer cache() {
+        return cache;
     }
 
     void batch(int size) {
