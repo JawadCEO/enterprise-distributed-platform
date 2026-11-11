@@ -2,6 +2,10 @@ server:
   port: 8080
   tomcat:
     max-swallow-size: 512KB
+    # Each request can wait up to the Kafka publish timeout; more threads than this only add memory.
+    threads:
+      max: 64
+    accept-count: 200
 
 spring:
   application:
