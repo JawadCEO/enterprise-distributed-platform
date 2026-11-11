@@ -5,6 +5,7 @@ import com.edp.iot.ingest.IngestProperties;
 import com.edp.iot.ingest.auth.AuthException;
 import com.edp.iot.ingest.auth.SenderAuthenticator;
 import com.fasterxml.jackson.databind.JsonNode;
+import org.springframework.dao.DataAccessException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -67,6 +68,17 @@ public class IngestController {
             builder.header(HttpHeaders.RETRY_AFTER, String.valueOf(Math.max(1, (response.retryAfterMs() + 999) / 1000)));
         }
         return builder.body(Map.of("results", response.results()));
+    }
+
+    /**
+     * The database is needed only for a line or key not in the cache yet. When it cannot be reached,
+     * the sender is told to retry soon rather than kept waiting.
+     */
+    @ExceptionHandler(DataAccessException.class)
+    ResponseEntity<Map<String, Object>> onDatabase(DataAccessException e) {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .header(HttpHeaders.RETRY_AFTER, "1")
+                .body(Map.of("code", "REGISTRY_UNAVAILABLE", "message", "Line registry unavailable, retry"));
     }
 
     @ExceptionHandler(AuthException.class)

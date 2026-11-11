@@ -16,9 +16,13 @@ import java.util.Optional;
 import java.util.Set;
 
 /**
- * Read-through cache of the line registry. Entries, including "not registered" answers, expire
- * after {@code ttl}, so a deactivation reaches every service within that time and a flood of
- * unknown ICCIDs does not reach the database.
+ * Read-through cache of the line registry. Entries, including "not registered" answers, are
+ * reloaded in the background once they are older than {@code ttl}, so a deactivation reaches every
+ * service within about that time and a flood of unknown ICCIDs does not reach the database.
+ *
+ * <p>While the database cannot be reached, a failed reload keeps the entry it had, so lines already
+ * seen keep working (the database drill in part 3). An entry is dropped only after
+ * {@code staleLimit} without a successful reload.
  */
 public class LineRegistry {
 
@@ -35,10 +39,18 @@ public class LineRegistry {
     private final JdbcTemplate jdbc;
     private final LoadingCache<String, Optional<LineInfo>> cache;
 
+    /** How long an entry is kept when it cannot be reloaded. */
+    public static final Duration DEFAULT_STALE_LIMIT = Duration.ofHours(1);
+
     public LineRegistry(JdbcTemplate jdbc, Duration ttl, long maxSize) {
+        this(jdbc, ttl, DEFAULT_STALE_LIMIT, maxSize);
+    }
+
+    public LineRegistry(JdbcTemplate jdbc, Duration ttl, Duration staleLimit, long maxSize) {
         this.jdbc = jdbc;
         this.cache = Caffeine.newBuilder()
-                .expireAfterWrite(ttl)
+                .refreshAfterWrite(ttl)
+                .expireAfterWrite(staleLimit.compareTo(ttl) > 0 ? staleLimit : ttl.multipliedBy(2))
                 .maximumSize(maxSize)
                 .build(new Loader());
     }

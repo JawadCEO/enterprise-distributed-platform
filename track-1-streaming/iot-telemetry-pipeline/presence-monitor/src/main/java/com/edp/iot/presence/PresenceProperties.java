@@ -32,6 +32,8 @@ public record PresenceProperties(
         @DefaultValue("0.5") double outageMinRatePerSec,
         /* After an outage ends, lines that have not reconnected yet are still not alerted for this long. */
         @DefaultValue("2m") Duration outageSettle,
+        /* Most lines a deadline repair puts back in one pass (see DeadlineRepair). */
+        @DefaultValue("10000") int repairBatchSize,
         @DefaultValue("12") int partitions,
         @DefaultValue("1") short replicationFactor,
         @DefaultValue("1") int minInsyncReplicas) {

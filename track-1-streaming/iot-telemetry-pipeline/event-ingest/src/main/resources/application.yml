@@ -15,6 +15,8 @@ spring:
     password: ${DB_PASSWORD:iot}
     hikari:
       maximum-pool-size: 5
+      # Only cache misses reach the database; while it is down they fail fast with 503.
+      connection-timeout: 1000
   data:
     redis:
       host: ${REDIS_HOST:localhost}
