@@ -117,6 +117,10 @@ final class TrafficEngine {
         scheduler.scheduleAtFixedRate(() -> log.info(stats.line((System.currentTimeMillis() - start) / 1000.0)),
                 5, 5, TimeUnit.SECONDS);
         scheduler.scheduleWithFixedDelay(this::flushLedger, 1, 1, TimeUnit.SECONDS);
+        if (props.gatewayBatch() > 0) {
+            log.info("Gateway mode: up to {} events from many lines per request", props.gatewayBatch());
+            scheduler.scheduleWithFixedDelay(this::sendReady, 10, 10, TimeUnit.MILLISECONDS);
+        }
 
         boolean[] outageLogged = {false, false};
         while (System.currentTimeMillis() < end) {
@@ -229,6 +233,10 @@ final class TrafficEngine {
     }
 
     private void trySend(SimLine line) {
+        if (props.gatewayBatch() > 0) {
+            ready(line);
+            return;
+        }
         List<SimLine.Event> batch;
         SimLine.Event lastAcked;
         String malformed = null;
@@ -289,11 +297,15 @@ final class TrafficEngine {
     }
 
     private void onResponse(SimLine line, List<SimLine.Event> sent, HttpResponse<String> response, Throwable error) {
+        onResults(line, sent, error != null || response == null ? null : parseResults(response.body()));
+    }
+
+    /** Applies one line's results; {@code results} is null when the request failed as a whole. */
+    private void onResults(SimLine line, List<SimLine.Event> sent, JsonNode results) {
         long retryAfterMs = 0;
         boolean failed = false;
         synchronized (line) {
             line.inFlight = false;
-            JsonNode results = error != null || response == null ? null : parseResults(response.body());
             if (results == null) {
                 stats.requestErrors.increment();
                 failed = true;
@@ -346,6 +358,107 @@ final class TrafficEngine {
         if (pending(line) && (generating || retryAfterMs < 30_000)) {
             scheduleSend(line, retryAfterMs);
         }
+    }
+
+    // ---- gateway mode: many lines per request (load benchmark) ----
+
+    private final ConcurrentLinkedQueue<SimLine> readyLines = new ConcurrentLinkedQueue<>();
+    private final Set<SimLine> queued = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    private void ready(SimLine line) {
+        if (queued.add(line)) {
+            readyLines.add(line);
+        }
+    }
+
+    /** Packs the events of ready lines into requests of up to {@code gatewayBatch} events and sends them. */
+    private void sendReady() {
+        try {
+            List<SimLine> group = new ArrayList<>();
+            List<List<SimLine.Event>> parts = new ArrayList<>();
+            int events = 0;
+            int lines = readyLines.size();
+            for (int i = 0; i < lines; i++) {
+                SimLine line = readyLines.poll();
+                if (line == null) {
+                    break;
+                }
+                queued.remove(line);
+                synchronized (line) {
+                    long now = System.currentTimeMillis();
+                    if (line.inFlight || line.buffer.isEmpty()) {
+                        continue;
+                    }
+                    if (now < line.backoffUntil) {
+                        scheduleSend(line, line.backoffUntil - now);
+                        continue;
+                    }
+                    int take = Math.min(line.buffer.size(), Math.min(props.maxBatch(), props.gatewayBatch() - events));
+                    if (take <= 0) {
+                        ready(line);
+                        continue;
+                    }
+                    parts.add(new ArrayList<>(new ArrayList<>(line.buffer).subList(0, take)));
+                    line.inFlight = true;
+                    group.add(line);
+                    events += take;
+                }
+                if (events >= props.gatewayBatch()) {
+                    sendGroup(group, parts);
+                    group = new ArrayList<>();
+                    parts = new ArrayList<>();
+                    events = 0;
+                }
+            }
+            if (!group.isEmpty()) {
+                sendGroup(group, parts);
+            }
+        } catch (RuntimeException e) {
+            log.warn("Gateway send round failed: {}", e.toString());
+        }
+    }
+
+    private void sendGroup(List<SimLine> group, List<List<SimLine.Event>> parts) {
+        StringBuilder body = new StringBuilder("{\"events\":[");
+        boolean first = true;
+        for (List<SimLine.Event> part : parts) {
+            for (SimLine.Event e : part) {
+                if (!first) {
+                    body.append(',');
+                }
+                body.append(e.json());
+                first = false;
+            }
+        }
+        body.append("]}");
+        HttpRequest request = HttpRequest.newBuilder(URI.create(props.ingestUrl() + "/v1/events"))
+                .timeout(Duration.ofSeconds(5))
+                .header("Content-Type", "application/json")
+                .header("Authorization", "ApiKey " + networkKey)
+                .POST(HttpRequest.BodyPublishers.ofString(body.toString()))
+                .build();
+        concurrency.acquireUninterruptibly();
+        long sentAt = System.nanoTime();
+        http.sendAsync(request, HttpResponse.BodyHandlers.ofString())
+                .whenComplete((response, error) -> {
+                    concurrency.release();
+                    stats.recordLatency((System.nanoTime() - sentAt) / 1000);
+                    JsonNode results = error != null || response == null ? null : parseResults(response.body());
+                    int offset = 0;
+                    for (int i = 0; i < group.size(); i++) {
+                        List<SimLine.Event> part = parts.get(i);
+                        JsonNode slice = null;
+                        if (results != null && results.size() >= offset + part.size()) {
+                            com.fasterxml.jackson.databind.node.ArrayNode a = com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.arrayNode();
+                            for (int j = 0; j < part.size(); j++) {
+                                a.add(results.get(offset + j));
+                            }
+                            slice = a;
+                        }
+                        offset += part.size();
+                        onResults(group.get(i), part, slice);
+                    }
+                });
     }
 
     private void scheduleSend(SimLine line, long delayMs) {
