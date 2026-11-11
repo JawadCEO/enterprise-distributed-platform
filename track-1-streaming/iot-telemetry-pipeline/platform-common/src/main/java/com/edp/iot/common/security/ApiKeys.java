@@ -16,8 +16,9 @@ import java.util.Optional;
 /**
  * API keys for customers, operators and network senders (Phase 4). A key looks like
  * {@code iot_<keyId>_<secret>}: the key ID is stored in clear and is safe to log, the whole key
- * only as a SHA-256 hash. Lookups are cached briefly, so a revoked key stops working within the
- * cache TTL.
+ * only as a SHA-256 hash. Lookups are cached briefly and reloaded in the background, so a revoked
+ * key stops working within about the cache TTL. A reload that fails because the database is down
+ * keeps the cached answer, for at most an hour.
  */
 public class ApiKeys {
 
@@ -54,7 +55,11 @@ public class ApiKeys {
 
     public ApiKeys(JdbcTemplate jdbc, Duration ttl) {
         this.jdbc = jdbc;
-        this.cache = Caffeine.newBuilder().expireAfterWrite(ttl).maximumSize(100_000).build(this::load);
+        this.cache = Caffeine.newBuilder()
+                .refreshAfterWrite(ttl)
+                .expireAfterWrite(Duration.ofHours(1).compareTo(ttl) > 0 ? Duration.ofHours(1) : ttl.multipliedBy(2))
+                .maximumSize(100_000)
+                .build(this::load);
     }
 
     public Optional<Principal> authenticate(String presented) {
