@@ -86,6 +86,8 @@ class Deliverer {
     private final Map<UUID, AtomicInteger> inFlight = new ConcurrentHashMap<>();
     private final Map<UUID, EndpointHealth> health = new ConcurrentHashMap<>();
     private final Object signal = new Object();
+    /** Set by {@link #wake()}; a wake that lands while a round is running starts the next round at once. */
+    private boolean woken;
     private final Counter delivered;
     private final Counter failed;
     private final Counter parked;
@@ -136,6 +138,7 @@ class Deliverer {
     /** New notifications were stored; look for work now instead of at the next poll. */
     void wake() {
         synchronized (signal) {
+            woken = true;
             signal.notifyAll();
         }
     }
@@ -149,7 +152,10 @@ class Deliverer {
             }
             synchronized (signal) {
                 try {
-                    signal.wait(200);
+                    if (!woken) {
+                        signal.wait(200);
+                    }
+                    woken = false;
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                     return;
