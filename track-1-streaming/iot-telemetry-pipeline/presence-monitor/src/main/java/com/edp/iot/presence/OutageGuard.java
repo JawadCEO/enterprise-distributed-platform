@@ -6,7 +6,6 @@ import com.edp.iot.common.notice.CustomerNotice;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -57,15 +56,14 @@ class OutageGuard {
     private final PresenceProperties props;
     private final AtomicLong openGauge;
     /**
-     * While every region is quiet, each region's usual rate when it started, kept in Redis so a
-     * restart doesn't forget it and start judging silent lines.
+     * While every region is quiet, each region's usual rate when it started. It is kept in
+     * PostgreSQL, so neither a restart of this service nor a Redis restart forgets it and starts
+     * judging silent lines.
      */
-    private static final String FLEET_SILENT_KEY = "presence:fleet-silent";
-    private final StringRedisTemplate redis;
+    private static final String FLEET_SILENT = "fleet-silent";
 
     OutageGuard(JdbcTemplate jdbc, TransactionTemplate tx, RegionRates rates, CustomerNoticeOutbox notices,
-                PresenceProperties props, MeterRegistry meters, StringRedisTemplate redis) {
-        this.redis = redis;
+                PresenceProperties props, MeterRegistry meters) {
         this.jdbc = jdbc;
         this.tx = tx;
         this.rates = rates;
@@ -89,15 +87,15 @@ class OutageGuard {
         for (String region : rates.regions()) {
             all.put(region, rates.read(region, now, props.outageRecentWindow(), props.outageBaselineWindow()));
         }
-        String stored = redis.opsForValue().get(FLEET_SILENT_KEY);
-        Map<String, Object> silent = stored == null ? null : Json.readMap(stored);
+        Map<String, Object> silent = jdbc.query("SELECT details::text FROM presence_latch WHERE name = ?",
+                (rs, n) -> Json.readMap(rs.getString(1)), FLEET_SILENT).stream().findFirst().orElse(null);
         if (silent != null) {
             boolean back = silent.entrySet().stream().anyMatch(e -> all.containsKey(e.getKey())
                     && all.get(e.getKey()).recentPerSec() >= props.outageRecoverShare() * ((Number) e.getValue()).doubleValue());
             if (!back) {
                 return new Decision(Set.of(), true);
             }
-            redis.delete(FLEET_SILENT_KEY);
+            jdbc.update("DELETE FROM presence_latch WHERE name = ?", FLEET_SILENT);
             log.info("Traffic is back after a silence across every region");
         }
         Map<String, RegionRates.Rates> judged = new LinkedHashMap<>();
@@ -125,7 +123,10 @@ class OutageGuard {
         if (fleetSilent) {
             Map<String, Double> baselines = new LinkedHashMap<>();
             judged.forEach((region, r) -> baselines.put(region, r.baselinePerSec()));
-            redis.opsForValue().set(FLEET_SILENT_KEY, Json.write(baselines));
+            jdbc.update("""
+                    INSERT INTO presence_latch (name, details) VALUES (?, ?::jsonb)
+                    ON CONFLICT (name) DO UPDATE SET details = EXCLUDED.details, set_at = now()
+                    """, FLEET_SILENT, Json.write(baselines));
             log.warn("Every region went quiet at once ({}); treating it as a platform or network-wide problem, not a regional outage",
                     collapsed);
         } else {
