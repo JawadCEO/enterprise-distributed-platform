@@ -49,6 +49,14 @@ public class SimulatorApplication implements CommandLineRunner, ExitCodeGenerato
             new NetworkService(props, http, registrar).run();
             return;
         }
+        if (props.mode().equals("register")) {
+            registrar.registerFleet(); // the two-region simulation imports the same fleet into each region
+            return;
+        }
+        if (props.mode().equals("reconcile")) {
+            reconcileFromLedger(http, registrar);
+            return;
+        }
         if (props.register()) {
             registrar.registerFleet();
         }
@@ -111,6 +119,33 @@ public class SimulatorApplication implements CommandLineRunner, ExitCodeGenerato
                 n.outageNotices(), n.outageNoticesWrong(), n.alertsDuringOutage(), (long) n.p50Ms(), (long) n.p95Ms(),
                 n.clean() ? "PASS" : "FAIL");
         exitCode = n.clean() && exitCode == 0 ? 0 : 1;
+    }
+
+    /**
+     * Compares one region's usage totals with the ledger file a traffic run wrote, so the same run can
+     * be checked against every region (part 5). Assumes the region's database was fresh for that run.
+     */
+    private void reconcileFromLedger(HttpClient http, Registrar registrar) throws Exception {
+        UsageLedger ledger = new UsageLedger();
+        try (var reader = java.nio.file.Files.newBufferedReader(java.nio.file.Path.of(props.ledgerFile()))) {
+            String row;
+            while ((row = reader.readLine()) != null) {
+                String[] f = row.split(",");
+                if (f.length >= 4 && Long.parseLong(f[3]) > 0) {
+                    ledger.acked(f[0], f[1], Long.parseLong(f[3]));
+                }
+            }
+        }
+        TrafficEngine engine = new TrafficEngine(props, http, registrar, "");
+        Reconciler reconciler = new Reconciler(http, registrar);
+        Map<String, Reconciler.Usage> zero = new java.util.HashMap<>();
+        reconciler.read(engine.lines()).forEach((iccid, u) ->
+                zero.put(iccid, new Reconciler.Usage(u.cycleStart(), 0, u.lineState())));
+        Reconciler.Report r = reconciler.reconcile(engine.lines(), zero, ledger, java.util.Set.of(), props.reconcileTimeout());
+        log.info("Usage reconciliation at {}: {} lines, {} matched, {} short, {} over, {} skipped; acknowledged {} bytes, "
+                        + "platform counted {} bytes. {}", props.apiUrl(), r.lines(), r.matched(), r.short_(), r.over(),
+                r.skipped(), r.ledgerBytes(), r.platformBytes(), r.clean() ? "PASS" : "FAIL");
+        exitCode = r.clean() ? 0 : 1;
     }
 
     @Override

@@ -66,6 +66,7 @@ final class TrafficEngine {
         this.scenario = Scenario.of(props);
         this.http = http;
         this.networkKey = networkKey;
+        this.ingestUrls = props.ingestUrl().split(",");
         this.random = new Random(props.seed());
         this.concurrency = new Semaphore(props.maxConcurrentRequests());
         this.keepAliveWindowMs = registrar.keepAliveSeconds() * 1000L;
@@ -282,7 +283,7 @@ final class TrafficEngine {
         }
 
         String body = "{\"events\":[" + String.join(",", payload) + "]}";
-        HttpRequest request = HttpRequest.newBuilder(URI.create(props.ingestUrl() + "/v1/events"))
+        HttpRequest request = HttpRequest.newBuilder(URI.create(ingestUrl() + "/v1/events"))
                 .timeout(Duration.ofSeconds(5))
                 .header("Content-Type", "application/json")
                 .header("Authorization", "ApiKey " + networkKey)
@@ -300,7 +301,9 @@ final class TrafficEngine {
     }
 
     private void onResponse(SimLine line, List<SimLine.Event> sent, HttpResponse<String> response, Throwable error) {
-        onResults(line, sent, error != null || response == null ? null : parseResults(response.body()));
+        JsonNode results = error != null || response == null ? null : parseResults(response.body());
+        requestOutcome(results == null);
+        onResults(line, sent, results);
     }
 
     /** Applies one line's results; {@code results} is null when the request failed as a whole. */
@@ -360,6 +363,32 @@ final class TrafficEngine {
         }
         if (pending(line) && (generating || retryAfterMs < 30_000)) {
             scheduleSend(line, retryAfterMs);
+        }
+    }
+
+    // ---- failover across regions (part 5) ----
+
+    /** INGEST_URL may list several event-ingest addresses, one per region; the first is used until it fails. */
+    private final String[] ingestUrls;
+    private final java.util.concurrent.atomic.AtomicInteger currentIngest = new java.util.concurrent.atomic.AtomicInteger();
+    private final java.util.concurrent.atomic.AtomicInteger failuresInARow = new java.util.concurrent.atomic.AtomicInteger();
+    /** Whole requests failing in a row before the next region's event-ingest is tried. */
+    private static final int FAILOVER_AFTER = 20;
+
+    private String ingestUrl() {
+        return ingestUrls[currentIngest.get() % ingestUrls.length];
+    }
+
+    private void requestOutcome(boolean failed) {
+        if (!failed) {
+            failuresInARow.set(0);
+            return;
+        }
+        if (ingestUrls.length > 1 && failuresInARow.incrementAndGet() >= FAILOVER_AFTER) {
+            failuresInARow.set(0);
+            int next = currentIngest.incrementAndGet();
+            log.warn("event-ingest at {} keeps failing; failing over to {}",
+                    ingestUrls[(next - 1) % ingestUrls.length], ingestUrls[next % ingestUrls.length]);
         }
     }
 
@@ -434,7 +463,7 @@ final class TrafficEngine {
             }
         }
         body.append("]}");
-        HttpRequest request = HttpRequest.newBuilder(URI.create(props.ingestUrl() + "/v1/events"))
+        HttpRequest request = HttpRequest.newBuilder(URI.create(ingestUrl() + "/v1/events"))
                 .timeout(Duration.ofSeconds(5))
                 .header("Content-Type", "application/json")
                 .header("Authorization", "ApiKey " + networkKey)
@@ -447,6 +476,7 @@ final class TrafficEngine {
                     concurrency.release();
                     stats.recordLatency((System.nanoTime() - sentAt) / 1000);
                     JsonNode results = error != null || response == null ? null : parseResults(response.body());
+                    requestOutcome(results == null);
                     int offset = 0;
                     for (int i = 0; i < group.size(); i++) {
                         List<SimLine.Event> part = parts.get(i);
