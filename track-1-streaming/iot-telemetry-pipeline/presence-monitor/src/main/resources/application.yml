@@ -25,6 +25,9 @@ iot:
   presence:
     region: ${REGION:local}
     scan-interval-ms: ${PRESENCE_SCAN_INTERVAL_MS:10000}
+    partitions: ${KAFKA_PARTITIONS:12}
+    replication-factor: ${KAFKA_REPLICATION:1}
+    min-insync-replicas: ${KAFKA_MIN_ISR:1}
 
 management:
   endpoints:

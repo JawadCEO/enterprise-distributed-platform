@@ -61,5 +61,22 @@ public record SimulatorProperties(
         @DefaultValue("1s") Duration networkLatency,
         @DefaultValue("0.05") double networkRejectRate,
         @DefaultValue("0.05") double networkUnavailableRate,
-        @DefaultValue("0.01") double networkDropRate) {
+        @DefaultValue("0.01") double networkDropRate,
+        /* Webhooks (part 2c): each customer registers an endpoint served by this simulator. */
+        @DefaultValue("true") boolean webhooks,
+        @DefaultValue("8091") int webhookPort,
+        /* Host the platform reaches the simulator on; empty means this container's own address. */
+        @DefaultValue("") String webhookHost,
+        /* How each customer's endpoint behaves, by customer number in turn: ok answers at once, flaky
+           fails 30% of requests, late is down for the first 60 s, slow takes 2 s, dead always fails. */
+        @DefaultValue("ok,flaky,late,slow,dead") String webhookBehaviours,
+        /* Lines imported with a small data allowance (one in this many), so usage thresholds are crossed. */
+        @DefaultValue("20") int smallAllowanceEvery,
+        @DefaultValue("262144") long smallAllowanceBytes,
+        /* The outage scenario silences every line in this region for a while. */
+        @DefaultValue("south") String outageRegion,
+        @DefaultValue("150s") Duration outageStart,
+        @DefaultValue("90s") Duration outageLength,
+        /* How long to wait at the end for notifications to be delivered. */
+        @DefaultValue("120s") Duration notificationWait) {
 }

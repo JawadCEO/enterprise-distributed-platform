@@ -16,8 +16,9 @@ import java.util.concurrent.Executors;
 /**
  * A simulated carrier network. In traffic mode it imports lines, sends their network events to
  * event-ingest and customer requests to customer-api, then reconciles acknowledged usage and request
- * outcomes; it exits with 1 when usage was lost or double counted, or a request did not end the way
- * the network decided. In network mode it serves the network's provisioning interface.
+ * outcomes and webhooks; it exits with 1 when usage was lost or double counted, a request did not
+ * end the way the network decided, or a notification went missing, came twice for one change, or
+ * arrived unsigned or out of order. In network mode it serves the network's provisioning interface.
  */
 @SpringBootApplication
 @ConfigurationPropertiesScan
@@ -51,6 +52,12 @@ public class SimulatorApplication implements CommandLineRunner, ExitCodeGenerato
         if (props.register()) {
             registrar.registerFleet();
         }
+        WebhookReceiver receiver = null;
+        if (props.webhooks()) {
+            receiver = new WebhookReceiver(props);
+            receiver.secrets(registrar.registerWebhooks(receiver.start()));
+        }
+        java.time.Instant runStart = java.time.Instant.now();
         TrafficEngine engine = new TrafficEngine(props, http, registrar, registrar.networkKey());
         Reconciler reconciler = new Reconciler(http, registrar);
         Map<String, Reconciler.Usage> before = reconciler.read(engine.lines());
@@ -75,6 +82,9 @@ public class SimulatorApplication implements CommandLineRunner, ExitCodeGenerato
                 q.clean() ? "PASS" : "FAIL");
         exitCode = q.clean() ? 0 : 1;
         if (!props.reconcile()) {
+            if (receiver != null) {
+                receiver.stop();
+            }
             return;
         }
         Reconciler.Report r = reconciler.reconcile(engine.lines(), before, engine.usage(),
@@ -84,6 +94,23 @@ public class SimulatorApplication implements CommandLineRunner, ExitCodeGenerato
                 r.lines(), r.matched(), r.short_(), r.over(), r.uncertain(), r.skipped(), r.ledgerBytes(), r.platformBytes(),
                 r.clean() ? "PASS" : "FAIL");
         exitCode = r.clean() && exitCode == 0 ? 0 : 1;
+        if (receiver == null) {
+            return;
+        }
+        NotificationCheck.Report n = new NotificationCheck(props, http, registrar, receiver)
+                .run(runStart, engine.lines(), before, requests.tracked(), engine.outageWindow(), engine.outageLines());
+        receiver.stop();
+        log.info("Notification reconciliation: {} notifications ({} delivered, {} parked, {} pending), {} received "
+                        + "({} more than once), {} refused by failing endpoints; {} delivered but not received, {} received but "
+                        + "unknown, {} stuck pending, {} delivered to a dead endpoint, {} bad signatures, {} out of order per line; "
+                        + "requests {} checked / {} wrong; usage thresholds {} sent / {} wrong; outage notices {} sent / {} wrong, "
+                        + "{} line alerts during the outage; event to webhook p50 {} ms, p95 {} ms. {}",
+                n.notifications(), n.delivered(), n.parked(), n.pending(), n.received(), n.duplicatesReceived(), n.refused(),
+                n.deliveredNotReceived(), n.receivedUnknown(), n.stuckPending(), n.deadDelivered(), n.badSignatures(),
+                n.outOfOrder(), n.requestsChecked(), n.requestsWrong(), n.thresholdsSent(), n.thresholdsWrong(),
+                n.outageNotices(), n.outageNoticesWrong(), n.alertsDuringOutage(), (long) n.p50Ms(), (long) n.p95Ms(),
+                n.clean() ? "PASS" : "FAIL");
+        exitCode = n.clean() && exitCode == 0 ? 0 : 1;
     }
 
     @Override

@@ -1,6 +1,6 @@
 # iot-telemetry-pipeline
 
-**Status:** building. Parts 2a (lines and network events) and 2b (customer requests and provisioning) are built and run end to end; see the [2a run](results/carrier-2a-run-2026-11-10.md) and the [2b run](results/carrier-2b-run-2026-11-11.md). Webhooks and the outage guard come next.
+**Status:** building. The carrier code is complete: parts 2a (lines and network events), 2b (customer requests and provisioning) and 2c (webhooks and the outage guard) are built and run end to end; see the [2a run](results/carrier-2a-run-2026-11-10.md), the [2b run](results/carrier-2b-run-2026-11-11.md) and the [2c run](results/carrier-2c-run-2026-11-11.md). Failure drills come next.
 
 A mobile carrier's IoT connectivity platform (like Verizon ThingSpace): millions of SIM-connected trackers, meters and sensors for business customers. Start with [how it works](requirements/how-it-works.md).
 
@@ -49,18 +49,18 @@ Today customers poll the carrier to learn whether their devices are online, whet
 | Service | Responsibility | Built |
 |---|---|---|
 | `event-ingest` | Accepts network and device events, authenticates, rate limits, publishes to Kafka | Yes |
-| `customer-api` | Registry and line import, customer line requests, line and request queries, dead letters and replay; later webhook subscriptions | All but webhooks |
+| `customer-api` | Registry and line import, customer line requests, line and request queries, webhook endpoints and notifications, dead letters and replay | Yes |
 | `state-processor` | Applies events to line, device and usage state, in order, without duplicates | Yes |
-| `presence-monitor` | Marks lines offline when keep-alives stop; outage guard | Offline marking |
+| `presence-monitor` | Marks lines offline when keep-alives stop; outage guard | Yes |
 | `provisioning-worker` | Carries out line changes against the network, with retries, pacing and a sweeper | Yes; bulk jobs later |
-| `notifier` | Delivers webhooks with retries | Part 2c |
-| `network-simulator` | Test tool: network, devices and the network's provisioning interface, with faults on demand; reconciles usage and request outcomes at the end | Yes |
+| `notifier` | Delivers signed webhooks per endpoint, with retries, parking and per-line order | Yes |
+| `network-simulator` | Test tool: network, devices and the network's provisioning interface, with faults on demand; serves the customers' webhook endpoints; reconciles usage, request outcomes and notifications at the end | Yes |
 
 **Data stores**
 
 - PostgreSQL: registry, current line state, 90-day history, usage, requests, notifications, dead letters
-- Redis: rate-limit counters, duplicate keys, state cache, last-seen sorted set
-- Kafka: network events, retry tiers, dead letters, line commands, line changes
+- Redis: rate-limit counters, duplicate keys, state cache, last-seen sorted set, per-region event counters
+- Kafka: network events, retry tiers, dead letters, line commands, line changes, customer notices
 
 ## Phase plan
 

@@ -86,4 +86,4 @@
 | **Dedicated notifier, per-customer delivery with back-off, parking after 24 h** | Isolation between customers; retries don't block processing | More moving parts; per-customer concurrency to manage |
 | Customers consume a Kafka topic directly | No webhook retries on our side | Exposes Kafka to customers; most can't consume it |
 
-**Decision:** a dedicated `notifier` reading `line.changes`, delivering at least once with a stable `notificationId`, signed with a per-customer secret, with per-customer concurrency limits and back-off. Undeliverable notifications are parked and stay readable by API for 30 days.
+**Decision:** a dedicated `notifier` reading `line.changes` and `customer.notices`, delivering at least once with a stable `notificationId`, signed with a secret per endpoint, with per-endpoint concurrency limits and back-off. Undeliverable notifications are parked and stay readable by API for 30 days.

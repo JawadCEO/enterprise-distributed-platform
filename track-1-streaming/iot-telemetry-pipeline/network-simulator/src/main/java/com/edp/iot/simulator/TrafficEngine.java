@@ -56,6 +56,10 @@ final class TrafficEngine {
     private final ConcurrentLinkedQueue<String> ledgerFile = new ConcurrentLinkedQueue<>();
     private final long keepAliveWindowMs;
     private volatile boolean generating = true;
+    private final long outageStartsAt;
+    /** Lines that were connected when their region went silent. */
+    private final Set<String> outageLines = java.util.concurrent.ConcurrentHashMap.newKeySet();
+    private final long outageEndsAt;
 
     TrafficEngine(SimulatorProperties props, HttpClient http, Registrar registrar, String networkKey) {
         this.props = props;
@@ -67,6 +71,8 @@ final class TrafficEngine {
         this.keepAliveWindowMs = registrar.keepAliveSeconds() * 1000L;
         int tickMillis = (int) (props.tickSeconds() * 1000 * scenario.tickFactor());
         long now = System.currentTimeMillis();
+        this.outageStartsAt = scenario.regionOutage() ? now + props.outageStart().toMillis() : Long.MAX_VALUE;
+        this.outageEndsAt = scenario.regionOutage() ? outageStartsAt + props.outageLength().toMillis() : Long.MAX_VALUE;
         for (int i = 0; i < props.lines(); i++) {
             int customer = i % props.customers();
             boolean noisy = customer == 0 && scenario.noisyCustomerMultiplier() > 1;
@@ -85,21 +91,48 @@ final class TrafficEngine {
         return usage;
     }
 
+    /** The outage window as wall-clock times, or null when this scenario has none. */
+    long[] outageWindow() {
+        return scenario.regionOutage() ? new long[]{outageStartsAt, outageEndsAt} : null;
+    }
+
+    /** Lines that were connected when their region went silent: none of them should be alerted for it. */
+    Set<String> outageLines() {
+        return outageLines;
+    }
+
+    private boolean inOutage(SimLine line, long now) {
+        return now >= outageStartsAt && now < outageEndsAt && line.region.equals(props.outageRegion());
+    }
+
     Stats run() throws Exception {
         log.info("Scenario {}: {} lines, {} customers, tick {}s, duration {}", scenario.name(), props.lines(),
                 props.customers(), props.tickSeconds() * scenario.tickFactor(), props.duration());
+        if (scenario.regionOutage()) {
+            log.info("Region {} goes silent {} after the start, for {}", props.outageRegion(), props.outageStart(),
+                    props.outageLength());
+        }
         long start = System.currentTimeMillis();
         long end = start + props.duration().toMillis();
         scheduler.scheduleAtFixedRate(() -> log.info(stats.line((System.currentTimeMillis() - start) / 1000.0)),
                 5, 5, TimeUnit.SECONDS);
         scheduler.scheduleWithFixedDelay(this::flushLedger, 1, 1, TimeUnit.SECONDS);
 
+        boolean[] outageLogged = {false, false};
         while (System.currentTimeMillis() < end) {
             long now = System.currentTimeMillis();
             while (!due.isEmpty() && due.peek().nextDueAt <= now) {
                 SimLine line = due.poll();
                 tick(line, now);
                 due.add(line);
+            }
+            if (!outageLogged[0] && now >= outageStartsAt) {
+                outageLogged[0] = true;
+                log.info("Region {} is now silent", props.outageRegion());
+            }
+            if (!outageLogged[1] && now >= outageEndsAt) {
+                outageLogged[1] = true;
+                log.info("Region {} is back; its lines reconnect", props.outageRegion());
             }
             Thread.sleep(5);
         }
@@ -147,6 +180,15 @@ final class TrafficEngine {
             line.nextDueAt = now + line.tickMillis + random.nextInt(Math.max(1, line.tickMillis / 10));
             if (now < line.silentUntil || !line.live()) {
                 return; // quiet on purpose, or a SIM in inventory or deactivated
+            }
+            if (inOutage(line, now)) {
+                // the region's cells are down: the device can't reach the network, then re-attaches
+                if (line.attached) {
+                    outageLines.add(line.iccid);
+                }
+                line.attached = false;
+                line.detachedUntil = outageEndsAt;
+                return;
             }
             if (!line.attached) {
                 if (now >= line.detachedUntil) {

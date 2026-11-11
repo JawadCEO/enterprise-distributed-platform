@@ -52,6 +52,7 @@ class PresenceScanner {
     private final TransactionTemplate tx;
     private final PresenceProperties props;
     private final PresenceGuard guard = new PresenceGuard();
+    private final OutageGuard outages;
     private final MeterRegistry meters;
     private final AtomicLong lagGauge;
     private final AtomicLong pausedGauge;
@@ -60,7 +61,9 @@ class PresenceScanner {
     private volatile long windowReadAt;
 
     PresenceScanner(StringRedisTemplate redis, IngestionHealth health, OfflineStore store, LineRegistry registry,
-                    LineChangeOutbox outbox, TransactionTemplate tx, PresenceProperties props, MeterRegistry meters) {
+                    LineChangeOutbox outbox, TransactionTemplate tx, PresenceProperties props, MeterRegistry meters,
+                    OutageGuard outages) {
+        this.outages = outages;
         this.meters = meters;
         this.lagGauge = meters.gauge("iot.presence.processor.lag", new AtomicLong());
         this.pausedGauge = meters.gauge("iot.presence.paused", new AtomicLong());
@@ -87,7 +90,12 @@ class PresenceScanner {
                         snapshot.ingestUp(), snapshot.processorLag(), guard.healthySince());
                 return;
             }
-            int marked = markDue(now);
+            OutageGuard.Decision decision = outages.evaluate(now);
+            if (decision.fleetSilent()) {
+                pausedGauge.set(1);
+                return; // a silence this wide is not the devices' doing (FR-21); judge no line now
+            }
+            int marked = markDue(now, decision.covered());
             meters.counter("iot.presence.offline.marked").increment(marked);
             if (marked > 0) {
                 log.info("Marked {} lines offline", marked);
@@ -97,8 +105,10 @@ class PresenceScanner {
         }
     }
 
-    private int markDue(Instant now) {
-        Set<String> due = redis.opsForZSet().rangeByScore(PresenceKeys.DEADLINES, 0, now.toEpochMilli(), 0, props.batchSize());
+    private int markDue(Instant now, Set<String> outageRegions) {
+        // judged only once the deadline is outageHold old, so the outage guard has seen the region first
+        long cutoff = now.minus(props.outageHold()).toEpochMilli();
+        Set<String> due = redis.opsForZSet().rangeByScore(PresenceKeys.DEADLINES, 0, cutoff, 0, props.batchSize());
         if (due == null || due.isEmpty()) {
             return 0;
         }
@@ -106,7 +116,7 @@ class PresenceScanner {
         for (String iccid : due) {
             Optional<LineInfo> info = registry.find(iccid);
             if (info.isEmpty() || info.get().isDeactivated()) {
-                removeIfStale(iccid, now);
+                removeIfStale(iccid, cutoff);
                 continue;
             }
             if (!props.region().equals(info.get().homeRegion())) {
@@ -114,7 +124,7 @@ class PresenceScanner {
             }
             Duration window = info.get().keepAliveWindow().plus(props.grace());
             Optional<OfflineStore.Marked> marked = tx.execute(status -> {
-                Optional<OfflineStore.Marked> m = store.markOffline(iccid, window, now);
+                Optional<OfflineStore.Marked> m = store.markOffline(iccid, window, now, outageRegions);
                 m.ifPresent(x -> outbox.insert(List.of(x.change())));
                 return m;
             });
@@ -123,14 +133,14 @@ class PresenceScanner {
                 redis.opsForValue().set(DeviceStateView.cacheKey(iccid),
                         Json.write(DeviceStateView.of(marked.get().state())), props.stateCacheTtl());
             }
-            removeIfStale(iccid, now);
+            removeIfStale(iccid, cutoff);
         }
         outbox.publishCommitted(changes);
         return changes.size();
     }
 
-    private void removeIfStale(String iccid, Instant now) {
-        redis.execute(REMOVE_IF_STALE, List.of(PresenceKeys.DEADLINES), iccid, String.valueOf(now.toEpochMilli()));
+    private void removeIfStale(String iccid, long cutoffMillis) {
+        redis.execute(REMOVE_IF_STALE, List.of(PresenceKeys.DEADLINES), iccid, String.valueOf(cutoffMillis));
     }
 
     private long longestWindow() {

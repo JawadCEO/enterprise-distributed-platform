@@ -23,6 +23,9 @@ final class Registrar {
     private static final Logger log = LoggerFactory.getLogger(Registrar.class);
     static final String[] SIM_TYPES = {"REMOVABLE", "EMBEDDED", "INTEGRATED"};
     static final String[] DEVICE_KINDS = {"TRACKER", "METER", "FRIDGE_SENSOR"};
+    static final String[] REGIONS = {"north", "central", "south"};
+    /** Set once from the settings, so a line can work out its slot within its customer. */
+    static volatile int customerCount = 5;
     private static final int BATCH = 1000;
 
     private final HttpClient http;
@@ -31,6 +34,17 @@ final class Registrar {
     Registrar(HttpClient http, SimulatorProperties props) {
         this.http = http;
         this.props = props;
+        customerCount = Math.max(1, props.customers());
+    }
+
+    /** Each customer's lines are spread over the regions, so a regional outage touches every customer. */
+    static String region(int index, int customers) {
+        return REGIONS[(index / Math.max(1, customers)) % REGIONS.length];
+    }
+
+    /** Lines with a small allowance, so the 80% and 100% notifications happen within a run (FR-25). */
+    boolean smallAllowance(int slot) {
+        return props.smallAllowanceEvery() > 0 && slot % props.smallAllowanceEvery() == props.smallAllowanceEvery() / 3;
     }
 
     static String customerId(int index) {
@@ -93,7 +107,7 @@ final class Registrar {
                 line.put("deviceKind", deviceKind(i));
                 line.put("keepAliveSeconds", keepAliveSeconds());
                 line.put("planCode", "IOT-STANDARD");
-                line.put("dataAllowanceBytes", 50L * 1024 * 1024);
+                line.put("dataAllowanceBytes", smallAllowance(i / props.customers()) ? props.smallAllowanceBytes() : 50L * 1024 * 1024);
                 line.put("initialState", inventory(i / props.customers()) ? "INVENTORY" : "ACTIVE");
                 batch.add(line);
                 if (batch.size() == BATCH) {
@@ -121,6 +135,38 @@ final class Registrar {
             throw new IllegalStateException("Network key request failed: " + response.statusCode() + " " + response.body());
         }
         return Jsons.read(response.body()).path("apiKey").asText();
+    }
+
+    /**
+     * Replaces each customer's webhook endpoints with one served by this simulator, subscribed to
+     * every notification type. Returns each customer's signing secret.
+     */
+    Map<String, String> registerWebhooks(String baseUrl) throws Exception {
+        Map<String, String> secrets = new LinkedHashMap<>();
+        for (int c = 0; c < props.customers(); c++) {
+            String customerId = customerId(c);
+            HttpResponse<String> existing = http.send(request("/v1/webhooks", customerId).GET().build(),
+                    HttpResponse.BodyHandlers.ofString());
+            if (existing.statusCode() == 200) {
+                for (var hook : Jsons.read(existing.body())) {
+                    if (hook.path("active").asBoolean()) {
+                        http.send(request("/v1/webhooks/" + hook.path("webhookId").asText(), customerId).DELETE().build(),
+                                HttpResponse.BodyHandlers.discarding());
+                    }
+                }
+            }
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("url", baseUrl + "/hooks/" + customerId);
+            body.put("types", List.of("REQUEST_COMPLETED", "REQUEST_FAILED", "DEVICE_ONLINE", "DEVICE_OFFLINE", "USAGE_80",
+                    "USAGE_100", "SIM_MOVED", "LINE_STATE_CHANGED", "OUTAGE_STARTED", "OUTAGE_ENDED"));
+            HttpResponse<String> created = send("POST", "/v1/webhooks", customerId, Jsons.write(body));
+            if (created.statusCode() != 201) {
+                throw new IllegalStateException("Webhook registration failed: " + created.statusCode() + " " + created.body());
+            }
+            secrets.put(customerId, Jsons.read(created.body()).path("secret").asText());
+        }
+        log.info("Webhooks registered for {} customers at {}", secrets.size(), baseUrl);
+        return secrets;
     }
 
     private int[] sendBatch(String customerId, List<Map<String, Object>> batch) throws Exception {

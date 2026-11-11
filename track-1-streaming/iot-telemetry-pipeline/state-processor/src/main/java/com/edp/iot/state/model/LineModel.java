@@ -268,10 +268,12 @@ public final class LineModel {
     }
 
     private void goOnline(Instant at, String reason, UUID eventId) {
+        // data.md section 5: no "online" for a line whose offline was covered by an outage notice (FR-21)
+        boolean notifyCustomer = alerting() && !Connection.REASON_REGION_OUTAGE.equals(state.connectionReason());
         state = copy(state, Connection.ONLINE, reason, at, state.imei(), state.region(), state.deviceKey(),
                 state.lastNetworkTime(), state.metrics());
         stateChanged = true;
-        change(ChangeKind.ONLINE, alerting(), eventId, at, Map.of("reason", reason));
+        change(ChangeKind.ONLINE, notifyCustomer, eventId, at, Map.of("reason", reason));
     }
 
     private void goOffline(Instant at, String reason, UUID eventId) {

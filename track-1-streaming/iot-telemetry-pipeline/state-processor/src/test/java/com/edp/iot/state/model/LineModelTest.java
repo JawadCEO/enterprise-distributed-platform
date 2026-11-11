@@ -197,4 +197,27 @@ class LineModelTest {
         assertThat(fresh.state().connection()).isEqualTo(Connection.ONLINE);
         assertThat(kinds(fresh)).containsExactly(ChangeKind.ONLINE);
     }
+
+    @Test
+    void lineMarkedOfflineDuringARegionOutageComesBackWithoutAnAlert() {
+        DeviceState inOutage = new DeviceState(ICCID, "cust-1", Connection.OFFLINE, Connection.REASON_REGION_OUTAGE,
+                T0.plusSeconds(60), T0, IMEI_A, "south", new OrderingKey(1, 5), T0, Map.of());
+        var r = run(line(SimType.REMOVABLE, false), inOutage,
+                List.of(network(EventType.DEVICE_ATTACHED, IMEI_A, T0.plusSeconds(120), Map.of("region", "south"))));
+
+        assertThat(r.state().connection()).isEqualTo(Connection.ONLINE);
+        LineChange online = r.changes().stream().filter(c -> c.kind() == ChangeKind.ONLINE).findFirst().orElseThrow();
+        assertThat(online.notifyCustomer()).isFalse(); // the customer had one outage notice instead (FR-21)
+    }
+
+    @Test
+    void lineThatWentSilentOnItsOwnComesBackWithAnAlert() {
+        DeviceState silent = new DeviceState(ICCID, "cust-1", Connection.OFFLINE, LineModel.REASON_KEEP_ALIVE_MISSED,
+                T0.plusSeconds(60), T0, IMEI_A, "south", new OrderingKey(1, 5), T0, Map.of());
+        var r = run(line(SimType.REMOVABLE, false), silent,
+                List.of(device(EventType.KEEP_ALIVE, IMEI_A, 1, 6, T0.plusSeconds(120), Map.of())));
+
+        LineChange online = r.changes().stream().filter(c -> c.kind() == ChangeKind.ONLINE).findFirst().orElseThrow();
+        assertThat(online.notifyCustomer()).isTrue();
+    }
 }

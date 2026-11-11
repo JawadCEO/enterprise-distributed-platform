@@ -22,3 +22,8 @@ iot:
     request-rate: ${REQUEST_RATE:2}
     network-url: ${NETWORK_URL:http://localhost:8090}
     network-latency: ${NETWORK_LATENCY:1s}
+    webhooks: ${WEBHOOKS:true}
+    webhook-host: ${WEBHOOK_HOST:}
+    outage-region: ${OUTAGE_REGION:south}
+    outage-start: ${OUTAGE_START:150s}
+    outage-length: ${OUTAGE_LENGTH:90s}

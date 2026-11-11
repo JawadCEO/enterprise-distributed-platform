@@ -26,8 +26,8 @@ import java.util.Set;
 import java.util.UUID;
 
 /**
- * Redis side of processing: duplicate keys (ADR-006), the device-state cache, and offline
- * deadlines.
+ * Redis side of processing: duplicate keys (ADR-006), the device-state cache, offline
+ * deadlines, and the per-region event counters the outage guard reads (FR-21).
  *
  * <p>Redis is an accelerator here, never the source of truth. Every call degrades instead of
  * failing the batch: without duplicate keys a resend is still caught by the ordering rules and,
@@ -83,7 +83,7 @@ public class RedisState {
      * late or retried event cannot pull it back.
      */
     public void afterCommit(Collection<NetworkEvent> processed, Collection<DeviceState> states,
-                            Map<String, Instant> deadlines) {
+                            Map<String, Instant> deadlines, RegionCounts regionCounts) {
         try {
             long dedupSeconds = props.dedupTtl().toSeconds();
             long cacheSeconds = props.stateCacheTtl().toSeconds();
@@ -99,11 +99,22 @@ public class RedisState {
                 }
                 deadlines.forEach((iccid, deadline) -> c.zSetCommands().zAdd(deadlineKey,
                         deadline.toEpochMilli(), bytes(iccid), RedisZSetCommands.ZAddArgs.empty().gt()));
+                regionCounts.buckets().forEach((key, count) -> {
+                    c.incrBy(key, count);
+                    c.expire(key, PresenceKeys.REGION_BUCKET_TTL_SECONDS);
+                });
+                if (!regionCounts.regions().isEmpty()) {
+                    c.sAdd(PresenceKeys.REGIONS, regionCounts.regions().toArray(String[]::new));
+                }
                 return null;
             });
         } catch (RuntimeException e) {
             log.warn("Redis update after commit skipped: {}", e.toString());
         }
+    }
+
+    /** Signs of life per region and receive-time bucket ({@link PresenceKeys#regionBucket}). */
+    public record RegionCounts(Map<String, Long> buckets, Set<String> regions) {
     }
 
     private static byte[] bytes(String value) {

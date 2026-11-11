@@ -95,9 +95,17 @@ final class RequestDriver {
     }
 
     /** Stops new requests, waits for the accepted ones to finish, then reconciles them with the network. */
+    /** Every request the driver made, with the outcome it last read. */
+    List<Tracked> tracked() {
+        return new ArrayList<>(tracked.values());
+    }
+
     Report finish() throws InterruptedException {
         scheduler.shutdownNow();
-        long deadline = System.currentTimeMillis() + props.requestWait().toMillis();
+        // wait from the newest request's start, not from now: one sent during the drain has its full time limit
+        long newest = inFlight.values().stream().map(t -> t.createdAt).filter(java.util.Objects::nonNull)
+                .mapToLong(Instant::toEpochMilli).max().orElse(System.currentTimeMillis());
+        long deadline = Math.max(System.currentTimeMillis(), newest) + props.requestWait().toMillis();
         while (!inFlight.isEmpty() && System.currentTimeMillis() < deadline) {
             poll();
             if (!inFlight.isEmpty()) {
@@ -203,6 +211,7 @@ final class RequestDriver {
 
     private Tracked track(SimLine line, String action, JsonNode body) {
         Tracked t = new Tracked(body.path("requestId").asText(), line, action);
+        t.createdAt = instant(body, "createdAt");
         tracked.put(t.requestId, t);
         inFlight.put(line, t);
         line.lineState = "PENDING";
@@ -226,8 +235,9 @@ final class RequestDriver {
     }
 
     /** Polls in-flight requests; a finished one updates the line's state as the simulator sees it. */
+    /** Polls every request still pending, including one whose line has since been given a newer request. */
     private void poll() {
-        for (Tracked t : new ArrayList<>(inFlight.values())) {
+        for (Tracked t : tracked.values().stream().filter(x -> x.status.equals("PENDING")).toList()) {
             JsonNode body = get("/v1/requests/" + t.requestId, t.line.customerId);
             if (body == null) {
                 continue;
@@ -244,7 +254,7 @@ final class RequestDriver {
             if (line != null) {
                 t.line.lineState = line.path("lineState").asText(t.line.lineState);
             }
-            inFlight.remove(t.line);
+            inFlight.remove(t.line, t); // only this request: the line may hold a newer one by now
         }
     }
 

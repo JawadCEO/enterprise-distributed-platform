@@ -61,7 +61,7 @@ Six services plus the simulator.
 | `event-ingest` | Authenticate network and device senders; check shape, size, known line; rate limit; publish; acknowledge | Event rate | None | FR-11 to FR-13 |
 | `customer-api` | Customer requests (validate, accept, queue); queries; webhook subscriptions; ops endpoints for dead letters | Request and read rate | PostgreSQL, Redis cache | FR-1 to FR-6, FR-9, FR-22, FR-26 to FR-30, FR-33 |
 | `state-processor` | Duplicate and order checks; apply events to line, device and usage state; resolve requests; detect SIM moves; publish changes | Partition count | None (Kafka offsets) | FR-14 to FR-18, FR-31, FR-32 |
-| `presence-monitor` | Find lines past their keep-alive window; outage guard | Line count | None (works from Redis) | FR-19 to FR-21 |
+| `presence-monitor` | Find lines past their keep-alive window; outage guard (per-region event rate against its usual rate) | Line count | PostgreSQL (`region_outage`, `customer_notice`) | FR-19 to FR-21 |
 | `provisioning-worker` | Carry out line commands against the network with retries, time limits and pacing; sweep stuck requests | Command rate | None | FR-7 to FR-10 |
 | `notifier` | Deliver webhooks per customer with retries and parking | Notification rate, customer count | PostgreSQL (`notification`) | FR-23 to FR-25 |
 | `network-simulator` (test tool) | Network, devices and provisioning system, with a ledger and fault injection | | Its own ledger | [data.md §9](../requirements/data.md#9-simulator) |
@@ -86,7 +86,8 @@ Details (partition counts, message format, retention) are fixed in Phase 2.
 | `network.events.retry.5s` / `.1m` / `.10m` | line ID | state-processor | state-processor |
 | `network.events.dlq` | line ID | state-processor | customer-api (ops) |
 | `line.commands` | line ID | customer-api (outbox) | provisioning-worker |
-| `line.changes` | line ID | state-processor, presence-monitor (outbox) | notifier |
+| `line.changes` | line ID | state-processor, presence-monitor, provisioning-worker (outbox) | notifier |
+| `customer.notices` | customer ID | presence-monitor (outbox): outage started and ended | notifier |
 
 ## 5. Key design properties
 
