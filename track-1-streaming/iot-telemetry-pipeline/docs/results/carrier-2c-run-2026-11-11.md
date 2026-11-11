@@ -34,7 +34,7 @@ Every endpoint checks the signature and timestamp the way a customer should. At 
 | Bad signatures | 0 |
 | Out of order for a line | 0 |
 | Requests | 305 finished, each with exactly one `REQUEST_COMPLETED` or `REQUEST_FAILED` of the right type |
-| Event to webhook, healthy endpoint (NFR-2a, target p95 < 2 s) | p50 16 ms, p95 32 ms, while the other four endpoints were failing or slow |
+| Event to webhook, healthy endpoint (NFR-2a, target p95 < 2 s) | p50 16 ms, p95 32 ms, while the other four endpoints were failing or slow. On a fresh database the first 10 s also carry each line's first "device online" notice; after the notifier wake-up fix that went in with this part, those 189 notices went out within 3.6 s, and the rest of the run stayed at 15 to 45 ms |
 | Requests and usage (2a and 2b checks, still on) | Both `PASS` |
 
 On a fresh database the same scenario also crossed usage thresholds: 34 `USAGE_80` and `USAGE_100` notifications, each exactly once per line where the run crossed it (FR-25), with 1,000 lines checked.

@@ -1,6 +1,6 @@
 # iot-telemetry-pipeline
 
-**Status:** building. The carrier code is complete: parts 2a (lines and network events), 2b (customer requests and provisioning) and 2c (webhooks and the outage guard) are built and run end to end; see the [2a run](results/carrier-2a-run-2026-11-10.md), the [2b run](results/carrier-2b-run-2026-11-11.md) and the [2c run](results/carrier-2c-run-2026-11-11.md). Failure drills come next.
+**Status:** building. The carrier code is complete: parts 2a (lines and network events), 2b (customer requests and provisioning) and 2c (webhooks and the outage guard) are built and run end to end; see the [2a run](results/carrier-2a-run-2026-11-10.md), the [2b run](results/carrier-2b-run-2026-11-11.md) and the [2c run](results/carrier-2c-run-2026-11-11.md). Part 3, failure drills, kills a broker, the database, Redis and each service mid-run with nothing lost; see the [drills](results/carrier-3-drills-2026-11-11.md). Observability comes next.
 
 A mobile carrier's IoT connectivity platform (like Verizon ThingSpace): millions of SIM-connected trackers, meters and sensors for business customers. Start with [how it works](requirements/how-it-works.md).
 
