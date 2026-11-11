@@ -22,6 +22,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionTemplate;
+import io.micrometer.tracing.Span;
+import io.micrometer.tracing.Tracer;
+import org.springframework.beans.factory.ObjectProvider;
 
 import java.time.Instant;
 import java.time.LocalDate;
@@ -71,9 +74,12 @@ public class EventProcessor {
     private final TransactionTemplate tx;
     private final StateProperties props;
     private final StateMetrics metrics;
+    private final ObjectProvider<Tracer> tracer;
 
     public EventProcessor(LineRegistry registry, StateStore store, RequestStore requests, RedisState redis,
-                          LineChangeOutbox outbox, TransactionTemplate tx, StateProperties props, StateMetrics metrics) {
+                          LineChangeOutbox outbox, TransactionTemplate tx, StateProperties props, StateMetrics metrics,
+                          ObjectProvider<Tracer> tracer) {
+        this.tracer = tracer;
         this.registry = registry;
         this.store = store;
         this.requests = requests;
@@ -85,6 +91,7 @@ public class EventProcessor {
     }
 
     public Result process(List<NetworkEvent> events) {
+        metrics.pickedUp(events.stream().map(NetworkEvent::receivedAt).toList());
         Map<String, LineInfo> lines = registry.findAll(events.stream().map(NetworkEvent::lineId).distinct().toList());
 
         List<NetworkEvent> valid = new ArrayList<>(events.size());
@@ -119,7 +126,7 @@ public class EventProcessor {
             return new Result(0, List.of(), deadLetters);
         }
 
-        Committed committed = tx.execute(status -> {
+        Committed committed = traced("postgres commit", () -> metrics.database().record(() -> tx.execute(status -> {
             Map<String, LineState> lineStates = store.lockLines(byLine.keySet());
             List<LineChange> changes = new ArrayList<>();
             Set<String> lineStateChanged = new HashSet<>();
@@ -164,16 +171,37 @@ public class EventProcessor {
             outbox.insert(changes);
             lineStateChanged.addAll(lineStateUpdates.keySet());
             return new Committed(stateUpdates, changes, applied, counted.size(), lineStateChanged, deactivated);
-        });
+        })));
 
         deadLetters.addAll(committed.deadLetters());
         metrics.deadLettered(committed.deadLetters().size());
         committed.lineStateChanged().forEach(registry::invalidate);
-        redis.afterCommit(fresh, committed.states(), deadlines(byLine, lines), regionCounts(byLine, committed.states()));
+        traced("redis update", () -> {
+            metrics.cache().record(() ->
+                    redis.afterCommit(fresh, committed.states(), deadlines(byLine, lines), regionCounts(byLine, committed.states())));
+            return null;
+        });
         metrics.committed(fresh.stream().map(NetworkEvent::receivedAt).toList(), committed.applied(), valid.size(),
                 committed.changes().size(), committed.usageCounted());
         outbox.publishCommitted(committed.changes());
         return new Result(committed.applied(), committed.changes(), deadLetters);
+    }
+
+    /** Runs {@code work} in a child span of the batch span, so a trace shows the database and Redis hops (NFR-20). */
+    private <T> T traced(String name, java.util.function.Supplier<T> work) {
+        Tracer t = tracer.getIfAvailable();
+        if (t == null) {
+            return work.get();
+        }
+        Span span = t.nextSpan().name(name).start();
+        try (Tracer.SpanInScope ignored = t.withSpan(span)) {
+            return work.get();
+        } catch (RuntimeException e) {
+            span.error(e);
+            throw e;
+        } finally {
+            span.end();
+        }
     }
 
     /**

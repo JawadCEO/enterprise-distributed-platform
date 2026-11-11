@@ -18,6 +18,10 @@ spring:
       timeout: 500ms
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:9092}
+    template:
+      observation-enabled: true
+    listener:
+      observation-enabled: true
     consumer:
       auto-offset-reset: earliest
       enable-auto-commit: false
@@ -45,4 +49,18 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics
+        include: health,info,metrics,prometheus
+  metrics:
+    tags:
+      service: ${spring.application.name}
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+      minimum-expected-value:
+        http.server.requests: 1ms
+      maximum-expected-value:
+        http.server.requests: 10s
+  # Spans are exported only when MANAGEMENT_OTLP_TRACING_ENDPOINT is set (docker-compose.observability.yml).
+  tracing:
+    sampling:
+      probability: ${TRACE_SAMPLING:0.1}
