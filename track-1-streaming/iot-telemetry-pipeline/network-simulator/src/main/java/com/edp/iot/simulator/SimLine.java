@@ -25,6 +25,8 @@ final class SimLine {
     final String customerId;
     final int tickMillis;
     final boolean noisy;
+    /** The cell region the device attaches in. */
+    final String region;
 
     /**
      * A real device keeps its boot counter across power cycles. The simulator does not persist it,
@@ -61,6 +63,7 @@ final class SimLine {
         this.customerId = customerId;
         this.tickMillis = tickMillis;
         this.noisy = noisy;
+        this.region = Registrar.region(index, Registrar.customerCount);
         this.battery = 40 + random.nextDouble() * 60;
         this.signalBaseline = -60 - random.nextDouble() * 40;
     }
@@ -78,7 +81,7 @@ final class SimLine {
 
     Event attach(long nowMillis) {
         attached = true;
-        return network("DEVICE_ATTACHED", nowMillis, Map.of("region", "local"), imei, 0);
+        return network("DEVICE_ATTACHED", nowMillis, Map.of("region", region), imei, 0);
     }
 
     Event detach(long nowMillis, long untilMillis) {

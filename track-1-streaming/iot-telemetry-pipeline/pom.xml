@@ -25,6 +25,7 @@
         <module>presence-monitor</module>
         <module>customer-api</module>
         <module>provisioning-worker</module>
+        <module>notifier</module>
         <module>network-simulator</module>
     </modules>
 

@@ -95,9 +95,17 @@ final class RequestDriver {
     }
 
     /** Stops new requests, waits for the accepted ones to finish, then reconciles them with the network. */
+    /** Every request the driver made, with the outcome it last read. */
+    List<Tracked> tracked() {
+        return new ArrayList<>(tracked.values());
+    }
+
     Report finish() throws InterruptedException {
         scheduler.shutdownNow();
-        long deadline = System.currentTimeMillis() + props.requestWait().toMillis();
+        // wait from the newest request's start, not from now: one sent during the drain has its full time limit
+        long newest = inFlight.values().stream().map(t -> t.createdAt).filter(java.util.Objects::nonNull)
+                .mapToLong(Instant::toEpochMilli).max().orElse(System.currentTimeMillis());
+        long deadline = Math.max(System.currentTimeMillis(), newest) + props.requestWait().toMillis();
         while (!inFlight.isEmpty() && System.currentTimeMillis() < deadline) {
             poll();
             if (!inFlight.isEmpty()) {
@@ -203,6 +211,7 @@ final class RequestDriver {
 
     private Tracked track(SimLine line, String action, JsonNode body) {
         Tracked t = new Tracked(body.path("requestId").asText(), line, action);
+        t.createdAt = instant(body, "createdAt");
         tracked.put(t.requestId, t);
         inFlight.put(line, t);
         line.lineState = "PENDING";

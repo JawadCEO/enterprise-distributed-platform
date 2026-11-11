@@ -3,7 +3,7 @@ package com.edp.iot.common;
 import java.time.Duration;
 import java.util.List;
 
-/** Kafka topics (HLD section 4). Every topic is keyed by line ID (ICCID). */
+/** Kafka topics (HLD section 4). Every topic is keyed by line ID (ICCID), except {@link #CUSTOMER_NOTICES}. */
 public final class Topics {
 
     public static final String NETWORK_EVENTS = "network.events";
@@ -14,6 +14,8 @@ public final class Topics {
     public static final String LINE_CHANGES = "line.changes";
     /** Customer requests to carry out against the network (ADR-007). */
     public static final String LINE_COMMANDS = "line.commands";
+    /** Notices about a whole customer account, such as a regional outage and its recovery; keyed by customer ID. */
+    public static final String CUSTOMER_NOTICES = "customer.notices";
 
     /** Retry tiers in order, with the delay each one waits before reprocessing. */
     public static final List<RetryTier> RETRY_TIERS = List.of(

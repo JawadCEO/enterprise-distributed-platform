@@ -8,6 +8,7 @@ import com.edp.iot.common.event.NetworkEvent;
 import com.edp.iot.common.line.LineInfo;
 import com.edp.iot.common.line.LineRegistry;
 import com.edp.iot.common.line.LineState;
+import com.edp.iot.common.presence.PresenceKeys;
 import com.edp.iot.common.request.LineRequest;
 import com.edp.iot.common.request.RequestStatus;
 import com.edp.iot.common.request.RequestStore;
@@ -168,7 +169,7 @@ public class EventProcessor {
         deadLetters.addAll(committed.deadLetters());
         metrics.deadLettered(committed.deadLetters().size());
         committed.lineStateChanged().forEach(registry::invalidate);
-        redis.afterCommit(fresh, committed.states(), deadlines(byLine, lines));
+        redis.afterCommit(fresh, committed.states(), deadlines(byLine, lines), regionCounts(byLine, committed.states()));
         metrics.committed(fresh.stream().map(NetworkEvent::receivedAt).toList(), committed.applied(), valid.size(),
                 committed.changes().size(), committed.usageCounted());
         outbox.publishCommitted(committed.changes());
@@ -226,6 +227,29 @@ public class EventProcessor {
             return true;
         });
         return out;
+    }
+
+    /**
+     * Signs of life per region the line was last seen in, bucketed by when event-ingest received
+     * them, for the outage guard's rate counters (FR-21). A detach is not a sign of life; a line with
+     * no known region yet is not counted.
+     */
+    private static RedisState.RegionCounts regionCounts(Map<String, List<NetworkEvent>> byLine, List<DeviceState> states) {
+        Map<String, Long> buckets = new HashMap<>();
+        Set<String> regions = new HashSet<>();
+        for (DeviceState s : states) {
+            List<NetworkEvent> lineEvents = byLine.get(s.iccid());
+            if (s.region() == null || lineEvents == null) {
+                continue;
+            }
+            for (NetworkEvent e : lineEvents) {
+                if (e.type() != EventType.DEVICE_DETACHED && e.type() != EventType.PROVISIONING_RESULT) {
+                    buckets.merge(PresenceKeys.regionBucket(s.region(), e.receivedAt().getEpochSecond()), 1L, Long::sum);
+                    regions.add(s.region());
+                }
+            }
+        }
+        return new RedisState.RegionCounts(buckets, regions);
     }
 
     /**

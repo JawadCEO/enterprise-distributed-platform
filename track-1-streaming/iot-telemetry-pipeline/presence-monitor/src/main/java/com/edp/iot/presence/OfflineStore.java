@@ -16,6 +16,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 @Repository
 class OfflineStore {
@@ -32,12 +33,14 @@ class OfflineStore {
                 SELECT iccid, line_state FROM line WHERE iccid = ? FOR UPDATE
             )
             UPDATE device_state d
-               SET connection = 'OFFLINE', connection_reason = ?, connection_since = ?, updated_at = now()
+               SET connection = 'OFFLINE',
+                   connection_reason = CASE WHEN d.region = ANY(string_to_array(?, ',')) THEN 'REGION_OUTAGE' ELSE ? END,
+                   connection_since = ?, updated_at = now()
               FROM l
              WHERE d.iccid = l.iccid
                AND d.connection = 'ONLINE'
                AND d.last_seen <= ?
-            RETURNING l.line_state, d.customer_id, d.connection_since, d.last_seen, d.imei, d.region,
+            RETURNING l.line_state, d.connection_reason, d.customer_id, d.connection_since, d.last_seen, d.imei, d.region,
                       d.last_boot_id, d.last_sequence, d.last_network_time, d.metrics::text AS metrics
             """;
 
@@ -50,23 +53,34 @@ class OfflineStore {
         this.jdbc = jdbc;
     }
 
-    /** Call inside a transaction; the caller writes the change to the outbox in the same one. */
-    Optional<Marked> markOffline(String iccid, Duration window, Instant now) {
+    /**
+     * Call inside a transaction; the caller writes the change to the outbox in the same one. A line
+     * last seen in one of {@code outageRegions} is marked with reason {@code REGION_OUTAGE} and no
+     * alert: its customer got one outage notice instead (FR-21).
+     */
+    Optional<Marked> markOffline(String iccid, Duration window, Instant now, Set<String> outageRegions) {
         Instant silentSince = now.minus(window);
         List<Marked> rows = jdbc.query(MARK_OFFLINE, (rs, n) -> {
             Long boot = (Long) rs.getObject("last_boot_id");
             Long seq = (Long) rs.getObject("last_sequence");
             Timestamp network = rs.getTimestamp("last_network_time");
-            DeviceState state = new DeviceState(iccid, rs.getString("customer_id"), Connection.OFFLINE, REASON, now,
+            String reason = rs.getString("connection_reason");
+            DeviceState state = new DeviceState(iccid, rs.getString("customer_id"), Connection.OFFLINE, reason, now,
                     rs.getTimestamp("last_seen").toInstant(), rs.getString("imei"), rs.getString("region"),
                     boot == null || seq == null ? null : new OrderingKey(boot, seq),
                     network == null ? null : network.toInstant(), Json.readMap(rs.getString("metrics")));
             // FR-20: a suspended or deactivated line, or one mid profile switch, goes quiet without an alert.
-            boolean notifyCustomer = LineState.valueOf(rs.getString("line_state")) == LineState.ACTIVE;
-            LineChange change = LineChange.of(iccid, state.customerId(), ChangeKind.OFFLINE, notifyCustomer, null, now,
-                    Map.of("reason", REASON, "lastSeen", state.lastSeen().toString()));
+            boolean outage = Connection.REASON_REGION_OUTAGE.equals(reason);
+            boolean notifyCustomer = !outage && LineState.valueOf(rs.getString("line_state")) == LineState.ACTIVE;
+            Map<String, Object> details = new java.util.LinkedHashMap<>();
+            details.put("reason", reason);
+            details.put("lastSeen", state.lastSeen().toString());
+            if (outage) {
+                details.put("region", state.region());
+            }
+            LineChange change = LineChange.of(iccid, state.customerId(), ChangeKind.OFFLINE, notifyCustomer, null, now, details);
             return new Marked(state, change);
-        }, iccid, REASON, Timestamp.from(now), Timestamp.from(silentSince));
+        }, iccid, String.join(",", outageRegions), REASON, Timestamp.from(now), Timestamp.from(silentSince));
         return rows.stream().findFirst();
     }
 

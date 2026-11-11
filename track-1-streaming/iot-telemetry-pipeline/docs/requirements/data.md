@@ -54,9 +54,11 @@ Network-originated events (`DEVICE_ATTACHED`, `DEVICE_DETACHED`, `USAGE_RECORD`,
 | Deactivate | `POST /v1/lines/{iccid}/deactivate` | `ACTIVE`, `SUSPENDED` |
 | Switch profile (P2) | `POST /v1/lines/{iccid}/profile` | `ACTIVE`, `INVENTORY`; embedded/integrated only |
 | Bulk job (P1) | `POST /v1/jobs` with an action and up to 50,000 ICCIDs | Per line, as above |
-| Subscribe | `PUT /v1/webhooks` | Any |
+| Subscribe | `POST /v1/webhooks` with a URL and the notification types; `GET`, `PUT`, `DELETE /v1/webhooks/{id}` | Any |
+| Read notifications | `GET /v1/notifications?status=&type=&lineId=`, `GET /v1/notifications/{id}` | Any |
+| Send a parked notification again | `POST /v1/notifications/{id}/redeliver` | Any |
 
-Every request carries an `Idempotency-Key`.
+Every line request carries an `Idempotency-Key`.
 
 ## 3. How an event is processed
 
@@ -138,6 +140,18 @@ Keep-alives and routine status readings are **not** stored row by row: they only
 | Customer | Line state, history, request status, line lists | `customer-api` |
 | Billing system | Usage totals per line per cycle | Out of scope; exposed as a table and topic |
 | Operators | Dead letters, fleet health | Ops endpoints and dashboards |
+
+### Webhooks
+
+Each endpoint has its own signing secret, shown once when it is created. Every delivery is a `POST` of the notification as JSON with three headers:
+
+| Header | Value |
+|---|---|
+| `X-Notification-Id` | The `notificationId`, the same on every attempt, so the customer can drop repeats |
+| `X-Webhook-Timestamp` | Epoch seconds when this attempt was signed |
+| `X-Webhook-Signature` | `v1=` and the hex HMAC-SHA256 of `timestamp.body` with the endpoint's secret |
+
+Types: `REQUEST_COMPLETED`, `REQUEST_FAILED`, `DEVICE_ONLINE`, `DEVICE_OFFLINE`, `USAGE_80`, `USAGE_100`, `SIM_MOVED`, `LINE_STATE_CHANGED`, `OUTAGE_STARTED`, `OUTAGE_ENDED`. Any `2xx` answer counts as delivered. Anything else is retried with exponential back-off (1 s doubling to 10 min, with jitter) for 24 hours, then the notification is parked. Each endpoint has at most 4 requests in flight, and an endpoint that keeps failing is paused as a whole between tries, so one dead endpoint can't slow anyone else's. Notifications for one line reach an endpoint in the order they happened.
 
 ## 8. Volume
 
