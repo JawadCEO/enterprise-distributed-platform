@@ -1,7 +1,7 @@
 package com.edp.iot.presence;
 
-import com.edp.iot.common.outbox.StatusChangeOutbox;
-import com.edp.iot.common.registry.DeviceRegistry;
+import com.edp.iot.common.change.LineChangeOutbox;
+import com.edp.iot.common.line.LineRegistry;
 import org.apache.kafka.clients.admin.AdminClient;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
@@ -23,13 +23,13 @@ public class PresenceApplication {
     }
 
     @Bean
-    DeviceRegistry deviceRegistry(JdbcTemplate jdbc, PresenceProperties props) {
-        return new DeviceRegistry(jdbc, props.registryCacheTtl(), 1_000_000);
+    LineRegistry lineRegistry(JdbcTemplate jdbc, PresenceProperties props) {
+        return new LineRegistry(jdbc, props.registryCacheTtl(), 1_000_000);
     }
 
     @Bean
-    StatusChangeOutbox statusChangeOutbox(JdbcTemplate jdbc, KafkaTemplate<String, String> kafka, TransactionTemplate tx) {
-        return new StatusChangeOutbox(jdbc, kafka, tx, java.time.Duration.ofSeconds(5));
+    LineChangeOutbox lineChangeOutbox(JdbcTemplate jdbc, KafkaTemplate<String, String> kafka, TransactionTemplate tx) {
+        return new LineChangeOutbox(jdbc, kafka, tx, java.time.Duration.ofSeconds(5));
     }
 
     @Bean(destroyMethod = "close")

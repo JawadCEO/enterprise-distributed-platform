@@ -18,7 +18,7 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * Answers "is the platform currently receiving and processing events?". Both halves must hold
- * before a silent device can be blamed on the device rather than on the platform (FR-20).
+ * before a silent line can be blamed on its device rather than on the platform.
  */
 @Component
 class IngestionHealth {
@@ -35,32 +35,32 @@ class IngestionHealth {
         this.props = props;
     }
 
-    record Snapshot(boolean gatewayUp, long processorLag) {
+    record Snapshot(boolean ingestUp, long processorLag) {
         boolean healthy(long maxLag) {
-            return gatewayUp && processorLag >= 0 && processorLag <= maxLag;
+            return ingestUp && processorLag >= 0 && processorLag <= maxLag;
         }
     }
 
     Snapshot check() {
-        return new Snapshot(gatewayUp(), processorLag());
+        return new Snapshot(ingestUp(), processorLag());
     }
 
-    private boolean gatewayUp() {
+    private boolean ingestUp() {
         long since = System.currentTimeMillis() - props.beaconMaxAge().toMillis();
-        Long count = redis.opsForZSet().count(PresenceKeys.GATEWAY_BEACONS, since, Double.POSITIVE_INFINITY);
-        redis.opsForZSet().removeRangeByScore(PresenceKeys.GATEWAY_BEACONS, 0, since - 3_600_000);
+        Long count = redis.opsForZSet().count(PresenceKeys.INGEST_BEACONS, since, Double.POSITIVE_INFINITY);
+        redis.opsForZSet().removeRangeByScore(PresenceKeys.INGEST_BEACONS, 0, since - 3_600_000);
         return count != null && count > 0;
     }
 
-    /** Records on {@code telemetry.raw} not yet committed by the processor, or -1 if Kafka cannot tell. */
+    /** Records on {@code network.events} not yet committed by state-processor, or -1 if Kafka cannot tell. */
     private long processorLag() {
         try {
             Map<TopicPartition, OffsetAndMetadata> committed = admin.listConsumerGroupOffsets(props.processorGroup())
                     .partitionsToOffsetAndMetadata().get(5, TimeUnit.SECONDS);
             Map<TopicPartition, OffsetSpec> latestSpec = new HashMap<>();
-            admin.describeTopics(java.util.List.of(Topics.RAW)).allTopicNames().get(5, TimeUnit.SECONDS)
-                    .get(Topics.RAW).partitions()
-                    .forEach(p -> latestSpec.put(new TopicPartition(Topics.RAW, p.partition()), OffsetSpec.latest()));
+            admin.describeTopics(java.util.List.of(Topics.NETWORK_EVENTS)).allTopicNames().get(5, TimeUnit.SECONDS)
+                    .get(Topics.NETWORK_EVENTS).partitions()
+                    .forEach(p -> latestSpec.put(new TopicPartition(Topics.NETWORK_EVENTS, p.partition()), OffsetSpec.latest()));
             Map<TopicPartition, ListOffsetsResult.ListOffsetsResultInfo> latest =
                     admin.listOffsets(latestSpec).all().get(5, TimeUnit.SECONDS);
             long lag = 0;

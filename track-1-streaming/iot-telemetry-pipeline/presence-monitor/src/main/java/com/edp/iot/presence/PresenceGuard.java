@@ -4,10 +4,10 @@ import java.time.Duration;
 import java.time.Instant;
 
 /**
- * Decides whether offline marking may run (FR-20). After any unhealthy moment, including startup,
- * the platform must stay healthy for one full heartbeat window plus grace before a device can be
- * called silent: only then has every device had a fair chance to report. The longest window in the
- * fleet is used, so no device type is judged early.
+ * Decides whether offline marking may run. After any unhealthy moment, including startup, the
+ * platform must stay healthy for one full keep-alive window plus grace before a line can be called
+ * silent: only then has every device had a fair chance to report. The longest window in the fleet
+ * is used, so no kind of device is judged early.
  */
 class PresenceGuard {
 
@@ -15,7 +15,7 @@ class PresenceGuard {
 
     /**
      * @param healthy          whether ingestion and processing are healthy right now
-     * @param requiredHealthy  longest heartbeat window in the fleet plus grace
+     * @param requiredHealthy  longest keep-alive window in the fleet plus grace
      * @return true when offline marking may run
      */
     synchronized boolean allows(boolean healthy, Instant now, Duration requiredHealthy) {

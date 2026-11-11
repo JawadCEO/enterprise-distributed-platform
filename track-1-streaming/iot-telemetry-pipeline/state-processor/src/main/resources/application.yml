@@ -1,0 +1,48 @@
+server:
+  port: 8081
+
+spring:
+  application:
+    name: state-processor
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/iot}
+    username: ${DB_USER:iot}
+    password: ${DB_PASSWORD:iot}
+    hikari:
+      maximum-pool-size: 10
+      connection-timeout: 3000
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      timeout: 500ms
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:9092}
+    consumer:
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+      max-poll-records: 500
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      properties:
+        fetch.max.wait.ms: 10
+    producer:
+      acks: all
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      properties:
+        enable.idempotence: true
+        linger.ms: 2
+
+iot:
+  state:
+    concurrency: ${PROCESSOR_CONCURRENCY:3}
+    partitions: ${KAFKA_PARTITIONS:12}
+    replication-factor: ${KAFKA_REPLICATION:1}
+    min-insync-replicas: ${KAFKA_MIN_ISR:1}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
