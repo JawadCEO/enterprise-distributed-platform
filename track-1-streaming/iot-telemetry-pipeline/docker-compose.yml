@@ -121,7 +121,7 @@ services:
     environment:
       <<: *service-env
       SERVER_PORT: "8081"
-      PROCESSOR_CONCURRENCY: "3"
+      PROCESSOR_CONCURRENCY: ${PROCESSOR_CONCURRENCY:-3}
     depends_on:
       kafka: { condition: service_healthy }
       customer-api: { condition: service_healthy }

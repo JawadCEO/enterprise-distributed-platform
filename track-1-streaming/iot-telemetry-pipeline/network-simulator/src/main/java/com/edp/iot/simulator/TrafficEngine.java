@@ -283,7 +283,8 @@ final class TrafficEngine {
         }
 
         String body = "{\"events\":[" + String.join(",", payload) + "]}";
-        HttpRequest request = HttpRequest.newBuilder(URI.create(ingestUrl() + "/v1/events"))
+        int region = currentIngest.get();
+        HttpRequest request = HttpRequest.newBuilder(URI.create(ingestUrl(region) + "/v1/events"))
                 .timeout(Duration.ofSeconds(5))
                 .header("Content-Type", "application/json")
                 .header("Authorization", "ApiKey " + networkKey)
@@ -296,13 +297,13 @@ final class TrafficEngine {
                 .whenComplete((response, error) -> {
                     concurrency.release();
                     stats.recordLatency((System.nanoTime() - sentAt) / 1000);
-                    onResponse(line, order, response, error);
+                    onResponse(line, order, response, error, region);
                 });
     }
 
-    private void onResponse(SimLine line, List<SimLine.Event> sent, HttpResponse<String> response, Throwable error) {
+    private void onResponse(SimLine line, List<SimLine.Event> sent, HttpResponse<String> response, Throwable error, int region) {
         JsonNode results = error != null || response == null ? null : parseResults(response.body());
-        requestOutcome(results == null);
+        requestOutcome(region, results == null);
         onResults(line, sent, results);
     }
 
@@ -375,20 +376,27 @@ final class TrafficEngine {
     /** Whole requests failing in a row before the next region's event-ingest is tried. */
     private static final int FAILOVER_AFTER = 20;
 
-    private String ingestUrl() {
-        return ingestUrls[currentIngest.get() % ingestUrls.length];
+    private String ingestUrl(int region) {
+        return ingestUrls[region % ingestUrls.length];
     }
 
-    private void requestOutcome(boolean failed) {
+    /**
+     * Counts whole-request failures against the region the request went to. Answers from a region the
+     * simulator already left are ignored, so requests still in flight to a dead region don't send it
+     * straight back there.
+     */
+    private void requestOutcome(int region, boolean failed) {
+        if (region != currentIngest.get()) {
+            return;
+        }
         if (!failed) {
             failuresInARow.set(0);
             return;
         }
-        if (ingestUrls.length > 1 && failuresInARow.incrementAndGet() >= FAILOVER_AFTER) {
+        if (ingestUrls.length > 1 && failuresInARow.incrementAndGet() >= FAILOVER_AFTER
+                && currentIngest.compareAndSet(region, region + 1)) {
             failuresInARow.set(0);
-            int next = currentIngest.incrementAndGet();
-            log.warn("event-ingest at {} keeps failing; failing over to {}",
-                    ingestUrls[(next - 1) % ingestUrls.length], ingestUrls[next % ingestUrls.length]);
+            log.warn("event-ingest at {} keeps failing; failing over to {}", ingestUrl(region), ingestUrl(region + 1));
         }
     }
 
@@ -463,7 +471,8 @@ final class TrafficEngine {
             }
         }
         body.append("]}");
-        HttpRequest request = HttpRequest.newBuilder(URI.create(ingestUrl() + "/v1/events"))
+        int region = currentIngest.get();
+        HttpRequest request = HttpRequest.newBuilder(URI.create(ingestUrl(region) + "/v1/events"))
                 .timeout(Duration.ofSeconds(5))
                 .header("Content-Type", "application/json")
                 .header("Authorization", "ApiKey " + networkKey)
@@ -476,7 +485,7 @@ final class TrafficEngine {
                     concurrency.release();
                     stats.recordLatency((System.nanoTime() - sentAt) / 1000);
                     JsonNode results = error != null || response == null ? null : parseResults(response.body());
-                    requestOutcome(results == null);
+                    requestOutcome(region, results == null);
                     int offset = 0;
                     for (int i = 0; i < group.size(); i++) {
                         List<SimLine.Event> part = parts.get(i);
