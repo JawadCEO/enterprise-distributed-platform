@@ -14,9 +14,10 @@ import java.util.Map;
 import java.util.concurrent.Executors;
 
 /**
- * A simulated carrier network: imports lines, sends their network events to event-ingest, then
- * reconciles acknowledged usage against what customer-api reports. Exits with 1 when usage was
- * lost or double counted.
+ * A simulated carrier network. In traffic mode it imports lines, sends their network events to
+ * event-ingest and customer requests to customer-api, then reconciles acknowledged usage and request
+ * outcomes; it exits with 1 when usage was lost or double counted, or a request did not end the way
+ * the network decided. In network mode it serves the network's provisioning interface.
  */
 @SpringBootApplication
 @ConfigurationPropertiesScan
@@ -43,14 +44,36 @@ public class SimulatorApplication implements CommandLineRunner, ExitCodeGenerato
                 .executor(Executors.newFixedThreadPool(8))
                 .build();
         Registrar registrar = new Registrar(http, props);
+        if (props.mode().equals("network")) {
+            new NetworkService(props, http, registrar).run();
+            return;
+        }
         if (props.register()) {
             registrar.registerFleet();
         }
         TrafficEngine engine = new TrafficEngine(props, http, registrar, registrar.networkKey());
         Reconciler reconciler = new Reconciler(http, registrar);
-        Map<String, Reconciler.Usage> before = props.reconcile() ? reconciler.read(engine.lines()) : Map.of();
+        Map<String, Reconciler.Usage> before = reconciler.read(engine.lines());
+        for (SimLine line : engine.lines()) {
+            Reconciler.Usage u = before.get(line.iccid);
+            if (u != null && !u.lineState().isEmpty()) {
+                line.lineState = u.lineState(); // a rerun continues from where the last run left each line
+            }
+        }
+        RequestDriver requests = new RequestDriver(props, http, registrar, engine.lines(), props.seed() + 1);
+        requests.start();
         engine.run();
         log.info("Ledger of acknowledged events: {}", props.ledgerFile());
+        RequestDriver.Report q = requests.finish();
+        log.info("Request reconciliation: {} accepted, {} completed, {} failed as the network rejected, {} timed out, "
+                        + "{} still pending, {} not matching the network; duplicate keys {} ok / {} wrong; "
+                        + "in-progress conflicts {} ok / {} wrong; invalid actions {} ok / {} wrong; {} lines stuck PENDING; "
+                        + "202 to COMPLETED p50 {} ms, p95 {} ms. {}",
+                q.accepted(), q.completed(), q.failedRejected(), q.failedTimeout(), q.stillPending(), q.mismatched(),
+                q.duplicatesMatched(), q.duplicatesWrong(), q.conflictsAsExpected(), q.conflictsWrong(),
+                q.invalidAsExpected(), q.invalidWrong(), q.linesStuckPending(), (long) q.p50Ms(), (long) q.p95Ms(),
+                q.clean() ? "PASS" : "FAIL");
+        exitCode = q.clean() ? 0 : 1;
         if (!props.reconcile()) {
             return;
         }
@@ -60,7 +83,7 @@ public class SimulatorApplication implements CommandLineRunner, ExitCodeGenerato
                         + "{} skipped; acknowledged {} bytes, platform counted {} bytes. {}",
                 r.lines(), r.matched(), r.short_(), r.over(), r.uncertain(), r.skipped(), r.ledgerBytes(), r.platformBytes(),
                 r.clean() ? "PASS" : "FAIL");
-        exitCode = r.clean() ? 0 : 1;
+        exitCode = r.clean() && exitCode == 0 ? 0 : 1;
     }
 
     @Override

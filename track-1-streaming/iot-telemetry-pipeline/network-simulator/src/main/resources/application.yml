@@ -18,3 +18,7 @@ iot:
     duration: ${DURATION:300s}
     reconcile: ${RECONCILE:true}
     ledger-file: ${LEDGER_FILE:ack-ledger.csv}
+    mode: ${MODE:traffic}
+    request-rate: ${REQUEST_RATE:2}
+    network-url: ${NETWORK_URL:http://localhost:8090}
+    network-latency: ${NETWORK_LATENCY:1s}

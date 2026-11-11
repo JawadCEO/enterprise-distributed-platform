@@ -8,12 +8,17 @@ import com.edp.iot.common.event.NetworkEvent;
 import com.edp.iot.common.line.LineInfo;
 import com.edp.iot.common.line.LineRegistry;
 import com.edp.iot.common.line.LineState;
+import com.edp.iot.common.request.LineRequest;
+import com.edp.iot.common.request.RequestStatus;
+import com.edp.iot.common.request.RequestStore;
 import com.edp.iot.common.state.DeviceState;
 import com.edp.iot.state.StateProperties;
 import com.edp.iot.state.model.LineModel;
 import com.edp.iot.state.model.SecurityEvent;
 import com.edp.iot.state.model.UsageCycle;
 import com.edp.iot.state.store.StateStore;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -34,6 +39,7 @@ import java.util.UUID;
  *   <li>drop events for lines that were deleted or deactivated after their ack (dead letter)</li>
  *   <li>drop events already processed (Redis duplicate keys, ADR-006)</li>
  *   <li>lock the batch's lines in a stable order, then load their device state and usage cycles</li>
+ *   <li>finish the requests named by {@code PROVISIONING_RESULT} events (data.md section 4, stage 4)</li>
  *   <li>insert usage records keyed by event ID; only new ones count toward the total</li>
  *   <li>fold each line's events through {@link LineModel} and write state, usage, line state,
  *       security events and history (the history rows are the outbox for {@code line.changes})</li>
@@ -51,21 +57,25 @@ public class EventProcessor {
     }
 
     private record Committed(List<DeviceState> states, List<LineChange> changes, int applied, int usageCounted,
-                             Set<String> lineStateChanged) {
+                             Set<String> lineStateChanged, List<DeadLetter> deadLetters) {
     }
+
+    private static final Logger log = LoggerFactory.getLogger(EventProcessor.class);
 
     private final LineRegistry registry;
     private final StateStore store;
+    private final RequestStore requests;
     private final RedisState redis;
     private final LineChangeOutbox outbox;
     private final TransactionTemplate tx;
     private final StateProperties props;
     private final StateMetrics metrics;
 
-    public EventProcessor(LineRegistry registry, StateStore store, RedisState redis, LineChangeOutbox outbox,
-                          TransactionTemplate tx, StateProperties props, StateMetrics metrics) {
+    public EventProcessor(LineRegistry registry, StateStore store, RequestStore requests, RedisState redis,
+                          LineChangeOutbox outbox, TransactionTemplate tx, StateProperties props, StateMetrics metrics) {
         this.registry = registry;
         this.store = store;
+        this.requests = requests;
         this.redis = redis;
         this.outbox = outbox;
         this.tx = tx;
@@ -108,13 +118,17 @@ public class EventProcessor {
             return new Result(0, List.of(), deadLetters);
         }
 
-        List<NetworkEvent> usage = fresh.stream().filter(e -> e.type() == EventType.USAGE_RECORD).toList();
-        Set<LocalDate> cycleStarts = new HashSet<>();
-        usage.forEach(e -> cycleStarts.add(UsageCycle.cycleOf(e.networkTime())));
-
         Committed committed = tx.execute(status -> {
             Map<String, LineState> lineStates = store.lockLines(byLine.keySet());
+            List<LineChange> changes = new ArrayList<>();
+            Set<String> lineStateChanged = new HashSet<>();
+            resolveRequests(fresh, lineStates, changes, lineStateChanged);
+            List<DeadLetter> deactivated = dropDeactivated(byLine, lineStates);
             Map<String, DeviceState> states = store.loadStates(byLine.keySet());
+            List<NetworkEvent> usage = byLine.values().stream().flatMap(List::stream)
+                    .filter(e -> e.type() == EventType.USAGE_RECORD).toList();
+            Set<LocalDate> cycleStarts = new HashSet<>();
+            usage.forEach(e -> cycleStarts.add(UsageCycle.cycleOf(e.networkTime())));
             Map<String, Map<LocalDate, UsageCycle>> cycles = store.lockCycles(
                     usage.stream().map(NetworkEvent::lineId).distinct().toList(), cycleStarts);
             Set<UUID> counted = store.insertUsage(usage);
@@ -123,7 +137,6 @@ public class EventProcessor {
             List<UsageCycle> cycleUpdates = new ArrayList<>();
             Map<String, LineState> lineStateUpdates = new HashMap<>();
             List<SecurityEvent> security = new ArrayList<>();
-            List<LineChange> changes = new ArrayList<>();
             int applied = 0;
             for (Map.Entry<String, List<NetworkEvent>> entry : byLine.entrySet()) {
                 String iccid = entry.getKey();
@@ -148,15 +161,71 @@ public class EventProcessor {
             store.updateLineStates(lineStateUpdates);
             store.insertSecurityEvents(security);
             outbox.insert(changes);
-            return new Committed(stateUpdates, changes, applied, counted.size(), lineStateUpdates.keySet());
+            lineStateChanged.addAll(lineStateUpdates.keySet());
+            return new Committed(stateUpdates, changes, applied, counted.size(), lineStateChanged, deactivated);
         });
 
+        deadLetters.addAll(committed.deadLetters());
+        metrics.deadLettered(committed.deadLetters().size());
         committed.lineStateChanged().forEach(registry::invalidate);
         redis.afterCommit(fresh, committed.states(), deadlines(byLine, lines));
         metrics.committed(fresh.stream().map(NetworkEvent::receivedAt).toList(), committed.applied(), valid.size(),
                 committed.changes().size(), committed.usageCounted());
         outbox.publishCommitted(committed.changes());
         return new Result(committed.applied(), committed.changes(), deadLetters);
+    }
+
+    /**
+     * Finishes the pending request each {@code PROVISIONING_RESULT} names, moving the line to the
+     * action's target state ({@code DONE}) or back to where it was ({@code REJECTED}). A result for
+     * a request that is no longer pending (the sweeper already timed it out, or a repeat) changes
+     * nothing. Updates {@code lineStates} so the line model sees the new state.
+     */
+    private void resolveRequests(List<NetworkEvent> fresh, Map<String, LineState> lineStates, List<LineChange> changes,
+                                 Set<String> lineStateChanged) {
+        Map<UUID, NetworkEvent> byRequest = new LinkedHashMap<>();
+        for (NetworkEvent e : fresh) {
+            if (e.type() == EventType.PROVISIONING_RESULT && e.payload().get(NetworkEvent.REQUEST_ID) instanceof String id) {
+                byRequest.putIfAbsent(UUID.fromString(id), e);
+            }
+        }
+        if (byRequest.isEmpty()) {
+            return;
+        }
+        Map<UUID, LineRequest> pending = requests.lockPending(byRequest.keySet());
+        byRequest.forEach((requestId, e) -> {
+            LineRequest r = pending.get(requestId);
+            if (r == null || !r.iccid().equals(e.lineId())) {
+                log.info("Provisioning result for request {} on {} matches no pending request; ignored", requestId, e.lineId());
+                return;
+            }
+            boolean done = "DONE".equals(e.payload().get(NetworkEvent.OUTCOME));
+            Object reason = e.payload().get(NetworkEvent.REASON);
+            RequestStore.Finished f = requests.finish(r, lineStates.get(r.iccid()),
+                    done ? RequestStatus.COMPLETED : RequestStatus.FAILED,
+                    done ? null : reason instanceof String s ? s : RequestStore.REASON_NETWORK_REJECTED,
+                    e.eventId(), e.receivedAt());
+            lineStates.put(r.iccid(), f.lineState());
+            changes.addAll(f.changes());
+            lineStateChanged.add(r.iccid());
+        });
+    }
+
+    /**
+     * Events for a line the database shows as deactivated (newer than the registry cache, or
+     * deactivated earlier in this batch) are dead-lettered instead of applied.
+     */
+    private static List<DeadLetter> dropDeactivated(Map<String, List<NetworkEvent>> byLine, Map<String, LineState> lineStates) {
+        List<DeadLetter> out = new ArrayList<>();
+        byLine.entrySet().removeIf(entry -> {
+            if (lineStates.get(entry.getKey()) != LineState.DEACTIVATED) {
+                return false;
+            }
+            entry.getValue().stream().filter(e -> e.type() != EventType.PROVISIONING_RESULT)
+                    .forEach(e -> out.add(new DeadLetter(e, ReasonCodes.INACTIVE_LINE, "Line was deactivated")));
+            return true;
+        });
+        return out;
     }
 
     /**

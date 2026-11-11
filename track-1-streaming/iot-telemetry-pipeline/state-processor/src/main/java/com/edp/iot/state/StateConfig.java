@@ -3,6 +3,7 @@ package com.edp.iot.state;
 import com.edp.iot.common.Topics;
 import com.edp.iot.common.change.LineChangeOutbox;
 import com.edp.iot.common.line.LineRegistry;
+import com.edp.iot.common.request.RequestStore;
 import com.edp.iot.state.pipeline.FailureClassifier;
 import org.apache.kafka.clients.admin.NewTopic;
 import org.springframework.context.annotation.Bean;
@@ -26,6 +27,11 @@ class StateConfig {
     @Bean
     LineRegistry lineRegistry(JdbcTemplate jdbc, StateProperties props) {
         return new LineRegistry(jdbc, props.registryCacheTtl(), props.registryCacheSize());
+    }
+
+    @Bean
+    RequestStore requestStore(JdbcTemplate jdbc) {
+        return new RequestStore(jdbc);
     }
 
     @Bean

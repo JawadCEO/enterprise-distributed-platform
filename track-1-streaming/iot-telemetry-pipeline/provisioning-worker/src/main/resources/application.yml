@@ -1,0 +1,35 @@
+server:
+  port: 8083
+
+spring:
+  application:
+    name: provisioning-worker
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/iot}
+    username: ${DB_USER:iot}
+    password: ${DB_PASSWORD:iot}
+    hikari:
+      maximum-pool-size: 6
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:9092}
+    consumer:
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+    producer:
+      acks: all
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      properties:
+        enable.idempotence: true
+
+iot:
+  provisioning:
+    network-url: ${NETWORK_URL:http://localhost:8090}
+    network-rate-per-sec: ${NETWORK_RATE:100}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus

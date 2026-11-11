@@ -1,5 +1,5 @@
 name: iot-telemetry
-# Local stack: one Kafka broker (KRaft), PostgreSQL, Redis and the four services, with memory caps
+# Local stack: one Kafka broker (KRaft), PostgreSQL, Redis, the five services and the simulated network, with memory caps
 # sized for a 16GB laptop. The simulator runs on demand:
 #   docker compose --profile sim run --rm network-simulator
 # Three brokers for failure drills: add -f docker-compose.drills.yml
@@ -137,6 +137,43 @@ services:
       customer-api: { condition: service_healthy }
     healthcheck: *health
 
+  provisioning-worker:
+    <<: *service
+    build: { context: ., args: { MODULE: provisioning-worker } }
+    image: iot/provisioning-worker
+    ports:
+      - "18083:8083"
+    environment:
+      <<: *service-env
+      SERVER_PORT: "8083"
+      NETWORK_URL: http://network:8090
+    depends_on:
+      kafka: { condition: service_healthy }
+      customer-api: { condition: service_healthy }
+    healthcheck: *health
+
+  # The simulated carrier network's provisioning interface: takes commands from provisioning-worker
+  # and reports each outcome back through event-ingest.
+  network:
+    restart: unless-stopped
+    build: { context: ., args: { MODULE: network-simulator } }
+    image: iot/network-simulator
+    environment:
+      MODE: network
+      INGEST_URL: http://event-ingest:8080
+      API_URL: http://customer-api:8084
+      NETWORK_LATENCY: ${NETWORK_LATENCY:-1s}
+      IOT_OPERATOR_KEY: ${IOT_OPERATOR_KEY:-iot_localop_local-dev-only-operator-key}
+      JAVA_OPTS: "-Xmx128m -XX:+UseSerialGC"
+    mem_limit: 256m
+    depends_on:
+      customer-api: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8090/health | grep -q UP"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
   network-simulator:
     profiles: ["sim"]
     build: { context: ., args: { MODULE: network-simulator } }
@@ -144,6 +181,8 @@ services:
     environment:
       INGEST_URL: http://event-ingest:8080
       API_URL: http://customer-api:8084
+      NETWORK_URL: http://network:8090
+      REQUEST_RATE: ${REQUEST_RATE:-2}
       SCENARIO: ${SCENARIO:-steady}
       LINES: ${LINES:-1000}
       CUSTOMERS: ${CUSTOMERS:-5}
@@ -157,3 +196,5 @@ services:
     mem_limit: 512m
     depends_on:
       event-ingest: { condition: service_healthy }
+      network: { condition: service_healthy }
+      provisioning-worker: { condition: service_healthy }

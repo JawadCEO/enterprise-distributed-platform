@@ -56,6 +56,12 @@ final class Registrar {
         return DEVICE_KINDS[index % DEVICE_KINDS.length];
     }
 
+    /** Lines kept in INVENTORY at import, so activate requests have something to work on. */
+    boolean inventory(int slot) {
+        int every = props.inventoryShare() <= 0 ? Integer.MAX_VALUE : (int) Math.round(1 / props.inventoryShare());
+        return slot % every == every - 1;
+    }
+
     /** Keep-alive window the lines are imported with: two ticks, so one late report is not an outage. */
     int keepAliveSeconds() {
         return Math.max(1, 2 * props.tickSeconds());
@@ -88,7 +94,7 @@ final class Registrar {
                 line.put("keepAliveSeconds", keepAliveSeconds());
                 line.put("planCode", "IOT-STANDARD");
                 line.put("dataAllowanceBytes", 50L * 1024 * 1024);
-                line.put("initialState", "ACTIVE");
+                line.put("initialState", inventory(i / props.customers()) ? "INVENTORY" : "ACTIVE");
                 batch.add(line);
                 if (batch.size() == BATCH) {
                     int[] counts = sendBatch(customerId(c), batch);

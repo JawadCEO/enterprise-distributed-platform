@@ -93,6 +93,8 @@ public final class LineModel {
                 case USAGE_RECORD -> usage(e, toCount.remove(e.eventId()));
                 case DEVICE_STATUS, KEEP_ALIVE -> deviceEvent(e);
                 case DEVICE_ATTACHED, DEVICE_DETACHED, IMEI_CHANGED -> networkEvent(e);
+                // resolved against its request before the model runs (EventProcessor)
+                case PROVISIONING_RESULT -> false;
             };
             if (changed) {
                 applied++;

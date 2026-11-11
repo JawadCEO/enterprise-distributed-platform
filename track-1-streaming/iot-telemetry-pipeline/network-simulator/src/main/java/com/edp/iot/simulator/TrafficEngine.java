@@ -145,8 +145,8 @@ final class TrafficEngine {
     private void tick(SimLine line, long now) {
         synchronized (line) {
             line.nextDueAt = now + line.tickMillis + random.nextInt(Math.max(1, line.tickMillis / 10));
-            if (now < line.silentUntil) {
-                return;
+            if (now < line.silentUntil || !line.live()) {
+                return; // quiet on purpose, or a SIM in inventory or deactivated
             }
             if (!line.attached) {
                 if (now >= line.detachedUntil) {

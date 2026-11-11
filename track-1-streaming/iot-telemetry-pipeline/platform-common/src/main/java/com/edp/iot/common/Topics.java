@@ -12,6 +12,8 @@ public final class Topics {
     public static final String RETRY_10M = "network.events.retry.10m";
     public static final String DLQ = "network.events.dlq";
     public static final String LINE_CHANGES = "line.changes";
+    /** Customer requests to carry out against the network (ADR-007). */
+    public static final String LINE_COMMANDS = "line.commands";
 
     /** Retry tiers in order, with the delay each one waits before reprocessing. */
     public static final List<RetryTier> RETRY_TIERS = List.of(

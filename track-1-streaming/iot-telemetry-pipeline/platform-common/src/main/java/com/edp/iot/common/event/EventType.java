@@ -11,7 +11,9 @@ public enum EventType {
     DEVICE_ATTACHED(false),
     DEVICE_DETACHED(false),
     USAGE_RECORD(false),
-    IMEI_CHANGED(false);
+    IMEI_CHANGED(false),
+    /** The network's answer to a line command: {@code DONE} or {@code REJECTED} (data.md section 4). */
+    PROVISIONING_RESULT(false);
 
     private final boolean deviceEvent;
 

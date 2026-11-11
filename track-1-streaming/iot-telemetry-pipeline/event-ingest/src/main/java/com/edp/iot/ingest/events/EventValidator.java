@@ -124,6 +124,7 @@ public class EventValidator {
             case DEVICE_STATUS -> status(payloadNode, payload);
             case USAGE_RECORD -> usage(payloadNode, payload);
             case DEVICE_ATTACHED -> text(payloadNode, NetworkEvent.REGION, 32, payload);
+            case PROVISIONING_RESULT -> provisioning(payloadNode, payload);
             default -> null;
         };
         if (error != null) {
@@ -177,6 +178,22 @@ public class EventValidator {
             any = true;
         }
         return any ? null : "a usage record needs bytesUp or bytesDown";
+    }
+
+    /** The network's answer to a line command: which request, {@code DONE} or {@code REJECTED}, and why. */
+    private static String provisioning(JsonNode payload, Map<String, Object> out) {
+        String requestId = payload.path(NetworkEvent.REQUEST_ID).asText("");
+        try {
+            out.put(NetworkEvent.REQUEST_ID, UUID.fromString(requestId).toString());
+        } catch (IllegalArgumentException e) {
+            return NetworkEvent.REQUEST_ID + " must be a UUID";
+        }
+        String outcome = payload.path(NetworkEvent.OUTCOME).asText("");
+        if (!outcome.equals("DONE") && !outcome.equals("REJECTED")) {
+            return NetworkEvent.OUTCOME + " must be DONE or REJECTED";
+        }
+        out.put(NetworkEvent.OUTCOME, outcome);
+        return text(payload, NetworkEvent.REASON, 64, out);
     }
 
     private static String text(JsonNode payload, String field, int maxLength, Map<String, Object> out) {
