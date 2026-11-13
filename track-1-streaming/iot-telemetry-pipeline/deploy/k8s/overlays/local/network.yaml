@@ -1,0 +1,43 @@
+# The simulated carrier network's provisioning interface (network-simulator in network mode).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: network
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app.kubernetes.io/name: network }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: network }
+    spec:
+      containers:
+        - name: network
+          image: iot/network-simulator:local
+          imagePullPolicy: Never
+          env:
+            - { name: MODE, value: network }
+            - { name: INGEST_URL, value: "http://event-ingest:8080" }
+            - { name: API_URL, value: "http://customer-api:8084" }
+            - { name: NETWORK_LATENCY, value: 1s }
+            - { name: JAVA_OPTS, value: "-Xmx128m -XX:+UseSerialGC" }
+            - name: IOT_OPERATOR_KEY
+              valueFrom:
+                secretKeyRef: { name: iot-secrets, key: IOT_OPERATOR_KEY }
+          ports:
+            - { name: http, containerPort: 8090 }
+          readinessProbe:
+            httpGet: { path: /health, port: http }
+            periodSeconds: 5
+          resources:
+            requests: { cpu: 50m, memory: 256Mi }
+            limits: { memory: 256Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: network
+spec:
+  selector: { app.kubernetes.io/name: network }
+  ports:
+    - { name: http, port: 8090, targetPort: http }

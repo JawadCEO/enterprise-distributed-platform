@@ -1,0 +1,23 @@
+# Settings every service reads. Secrets (database password, operator key) are not here: they come
+# from the Secret iot-secrets, which the local overlay generates and production creates outside
+# the repository (NFR-17).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: iot-config
+data:
+  DB_URL: jdbc:postgresql://postgres:5432/iot
+  DB_USER: iot
+  REDIS_HOST: redis
+  KAFKA_BOOTSTRAP: kafka:9092
+  KAFKA_PARTITIONS: "12"
+  KAFKA_REPLICATION: "1"
+  KAFKA_MIN_ISR: "1"
+  NETWORK_URL: http://network:8090
+  # Heap plus capped native memory stays inside the container limit (part 5: event-ingest was
+  # OOM-killed at 5,000 events/s without the caps).
+  JAVA_OPTS: "-Xmx256m -XX:+UseSerialGC -Xss512k -XX:MaxDirectMemorySize=32m -XX:ReservedCodeCacheSize=48m -XX:MaxMetaspaceSize=128m"
+  # Finish in-flight HTTP requests and Kafka batches before stopping, within the pod's grace period.
+  SERVER_SHUTDOWN: graceful
+  SPRING_LIFECYCLE_TIMEOUT_PER_SHUTDOWN_PHASE: 20s
+  MANAGEMENT_ENDPOINT_HEALTH_PROBES_ENABLED: "true"

@@ -1,0 +1,21 @@
+# The IoT carrier platform's six services, the same in every environment. Overlays add the
+# infrastructure (local) or point at managed services (production), and set images and sizes.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: iot
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: iot-carrier-platform
+    includeSelectors: false
+    includeTemplates: true
+resources:
+  - namespace.yaml
+  - config.yaml
+  - network-policy.yaml
+  - customer-api.yaml
+  - event-ingest.yaml
+  - state-processor.yaml
+  - presence-monitor.yaml
+  - provisioning-worker.yaml
+  - notifier.yaml
+  - autoscaling.yaml

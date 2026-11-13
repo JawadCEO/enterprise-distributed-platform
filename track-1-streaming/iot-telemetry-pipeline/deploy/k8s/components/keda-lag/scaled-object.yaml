@@ -1,0 +1,28 @@
+# One more replica for every 5,000 events waiting (about a second of traffic per replica at the
+# part 5 rate), from 2 up to one replica per 3 partitions. Lag, unlike CPU, rises before the
+# freshness budget is spent and falls only once the backlog is gone.
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: state-processor
+spec:
+  scaleTargetRef:
+    name: state-processor
+  minReplicaCount: 2
+  maxReplicaCount: 43               # 128 partitions / 3 consumer threads per replica
+  pollingInterval: 10
+  cooldownPeriod: 300
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleDown:
+          stabilizationWindowSeconds: 300
+  triggers:
+    - type: kafka
+      metadata:
+        bootstrapServers: kafka:9092
+        consumerGroup: state-processor
+        topic: network.events
+        lagThreshold: "5000"
+        offsetResetPolicy: earliest
+        allowIdleConsumers: "false"

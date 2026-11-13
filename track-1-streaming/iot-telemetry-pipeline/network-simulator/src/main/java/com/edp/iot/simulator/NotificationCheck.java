@@ -54,7 +54,7 @@ final class NotificationCheck {
         this.receiver = receiver;
     }
 
-    Report run(Instant runStart, List<SimLine> lines, Map<String, Reconciler.Usage> usageBefore,
+    Report run(Instant runStart, Instant trafficEnd, List<SimLine> lines, Map<String, Reconciler.Usage> usageBefore,
                List<RequestDriver.Tracked> requests, long[] outageWindow, Set<String> outageLines) throws Exception {
         List<String> customers = new ArrayList<>();
         for (int c = 0; c < props.customers(); c++) {
@@ -182,15 +182,22 @@ final class NotificationCheck {
         }
 
         // outage: one start and one end notice per customer, no line alerts in the region meanwhile;
-        // without an outage scenario, no outage notice at all
-        int outageNotices = 0, outageWrong = 0, alertsDuringOutage = 0;
+        // without an outage scenario, no outage notice at all. Once traffic stops every region goes
+        // quiet, and the platform rightly calls that an outage if the checks take longer than its
+        // detection window, so only notices from while traffic ran count.
+        int outageNotices = 0, outageWrong = 0, alertsDuringOutage = 0, afterTraffic = 0;
         Map<String, int[]> noticesByCustomer = new HashMap<>();
         for (Platform p : platform) {
-            if (p.type().startsWith("OUTAGE_")) {
+            if (p.type().startsWith("OUTAGE_") && p.createdAt().isAfter(trafficEnd)) {
+                afterTraffic++;
+            } else if (p.type().startsWith("OUTAGE_")) {
                 outageNotices++;
                 int[] counts = noticesByCustomer.computeIfAbsent(p.customerId(), k -> new int[2]);
                 counts[p.type().equals("OUTAGE_STARTED") ? 0 : 1]++;
             }
+        }
+        if (afterTraffic > 0) {
+            log.info("{} outage notices after traffic stopped, not counted", afterTraffic);
         }
         if (outageWindow == null) {
             outageWrong = outageNotices;
