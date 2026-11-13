@@ -17,6 +17,8 @@ A mobile carrier's IoT connectivity platform (like Verizon ThingSpace): millions
 | [Architecture decisions](requirements/architecture-decisions.md) |
 | [Decisions still needed](requirements/open-questions.md) |
 | [High-level design](architecture/high-level-design.md) |
+| [Runbook: deploy, roll back, scale, and what to do for each alert](operations/runbook.md) |
+| [Kubernetes manifests](../deploy/k8s/README.md) and the [part 6 results](results/carrier-6-kubernetes-2026-11-13.md) |
 
 ## Brief
 
