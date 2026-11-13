@@ -18,6 +18,9 @@ x-service: &service
     JAVA_OPTS: "-Xmx256m -XX:+UseSerialGC"
     # Local development key only; set your own outside this laptop stack.
     IOT_OPERATOR_KEY: ${IOT_OPERATOR_KEY:-iot_localop_local-dev-only-operator-key}
+    # The simulated customers' endpoints are plain http on the Docker network. Anywhere else webhook
+    # URLs must be https to public addresses; never set this outside the laptop stack.
+    WEBHOOK_ALLOW_INSECURE_URLS: "true"
   mem_limit: 400m
 
 services:

@@ -29,6 +29,7 @@ iot:
     partitions: ${KAFKA_PARTITIONS:12}
     replication-factor: ${KAFKA_REPLICATION:1}
     min-insync-replicas: ${KAFKA_MIN_ISR:1}
+    allow-insecure-urls: ${WEBHOOK_ALLOW_INSECURE_URLS:false}
 
 management:
   endpoints:

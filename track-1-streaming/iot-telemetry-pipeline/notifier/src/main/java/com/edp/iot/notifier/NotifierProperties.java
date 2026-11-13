@@ -22,5 +22,7 @@ public record NotifierProperties(
         @DefaultValue("10s") Duration webhookCacheTtl,
         @DefaultValue("12") int partitions,
         @DefaultValue("1") short replicationFactor,
-        @DefaultValue("1") int minInsyncReplicas) {
+        @DefaultValue("1") int minInsyncReplicas,
+        /* Local stack only: plain http and private addresses for the simulated customers (WebhookUrlPolicy). */
+        @DefaultValue("false") boolean allowInsecureUrls) {
 }
