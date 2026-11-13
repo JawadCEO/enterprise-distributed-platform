@@ -16,6 +16,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.UUID;
@@ -36,6 +37,9 @@ import java.util.concurrent.TimeUnit;
  *       the platform's time limit has to fail them.</li>
  *   <li>{@code GET /v1/provision/{requestId}} returns what the network decided, which the traffic
  *       run uses to reconcile the platform's request outcomes.</li>
+ *   <li>A {@code SWITCH_PROFILE} (Flow E) makes the device drop off the network and come back while
+ *       it enables the new profile, so the platform sees a detach and an attach before the result.
+ *       A rejected switch reports {@code PROFILE_FAILED}: the device fell back to its old profile.</li>
  * </ul>
  */
 final class NetworkService {
@@ -141,6 +145,9 @@ final class NetworkService {
                 Entry e = new Entry(id, iccid, action, outcome, Instant.now());
                 if (outcome != Outcome.DROPPED) {
                     long latency = (long) (props.networkLatency().toMillis() * (0.5 + random.nextDouble()));
+                    if (action.equals("SWITCH_PROFILE")) {
+                        scheduler.schedule(() -> reconnect(e, 0), latency / 2, TimeUnit.MILLISECONDS);
+                    }
                     scheduler.schedule(() -> report(e, 0), latency, TimeUnit.MILLISECONDS);
                 }
                 return e;
@@ -157,7 +164,7 @@ final class NetworkService {
         payload.put("requestId", e.requestId);
         payload.put("outcome", e.outcome.name());
         if (e.outcome == Outcome.REJECTED) {
-            payload.put("reason", "NETWORK_REJECTED");
+            payload.put("reason", e.action.equals("SWITCH_PROFILE") ? "PROFILE_FAILED" : "NETWORK_REJECTED");
         }
         Map<String, Object> event = new LinkedHashMap<>();
         event.put("eventId", UUID.nameUUIDFromBytes(("result:" + e.requestId).getBytes(StandardCharsets.UTF_8)).toString());
@@ -184,6 +191,35 @@ final class NetworkService {
                         TimeUnit.MILLISECONDS);
             } else {
                 log.error("Gave up reporting the result for {}", e.requestId);
+            }
+        });
+    }
+
+    /** The device detaching and re-attaching while it switches profile, sent before the result. */
+    private void reconnect(Entry e, int attempt) {
+        Instant now = Instant.now();
+        List<String> events = new java.util.ArrayList<>();
+        for (String type : List.of("DEVICE_DETACHED", "DEVICE_ATTACHED")) {
+            Map<String, Object> event = new LinkedHashMap<>();
+            event.put("eventId", UUID.nameUUIDFromBytes((type + ":" + e.requestId).getBytes(StandardCharsets.UTF_8)).toString());
+            event.put("type", type);
+            event.put("lineId", e.iccid);
+            // the network sees the device's IMEI when it attaches; simulated lines number their devices like their SIMs
+            event.put("imei", Registrar.imei(Integer.parseInt(e.iccid.substring(5)) - 1));
+            event.put("networkTime", (type.equals("DEVICE_DETACHED") ? now : now.plusMillis(1)).toString());
+            events.add(Jsons.write(event));
+        }
+        HttpRequest request = HttpRequest.newBuilder(URI.create(props.ingestUrl() + "/v1/events"))
+                .timeout(Duration.ofSeconds(5))
+                .header("Content-Type", "application/json")
+                .header("Authorization", "ApiKey " + networkKey)
+                .POST(HttpRequest.BodyPublishers.ofString("{\"events\":[" + String.join(",", events) + "]}"))
+                .build();
+        http.sendAsync(request, HttpResponse.BodyHandlers.ofString()).whenComplete((response, error) -> {
+            if ((error != null || response == null || response.statusCode() >= 500) && attempt < 20) {
+                scheduler.schedule(() -> reconnect(e, attempt + 1), 200, TimeUnit.MILLISECONDS);
+            } else if (response != null && response.body().contains("\"REJECTED\"")) {
+                log.warn("event-ingest rejected the reconnect of {}: {}", e.iccid, response.body());
             }
         });
     }

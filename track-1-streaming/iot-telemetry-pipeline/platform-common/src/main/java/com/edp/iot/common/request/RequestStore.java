@@ -36,10 +36,12 @@ public class RequestStore {
             LineState.valueOf(rs.getString("previous_state")),
             rs.getTimestamp("created_at").toInstant(),
             rs.getTimestamp("deadline_at").toInstant(),
-            rs.getTimestamp("completed_at") == null ? null : rs.getTimestamp("completed_at").toInstant());
+            rs.getTimestamp("completed_at") == null ? null : rs.getTimestamp("completed_at").toInstant(),
+            rs.getString("profile"),
+            rs.getObject("job_id", UUID.class));
 
-    public static final String COLUMNS =
-            "request_id, customer_id, iccid, action, status, reason, previous_state, created_at, deadline_at, completed_at";
+    public static final String COLUMNS = "request_id, customer_id, iccid, action, status, reason, previous_state, created_at, "
+            + "deadline_at, completed_at, profile, job_id";
 
     /** The line state a request leaves behind, and the history rows that describe it. */
     public record Finished(LineRequest request, LineState lineState, List<LineChange> changes) {
@@ -94,13 +96,22 @@ public class RequestStore {
                            Instant at) {
         jdbc.update("UPDATE line_request SET status = ?, reason = ?, completed_at = ? WHERE request_id = ? AND status = 'PENDING'",
                 status.name(), reason, Timestamp.from(at), r.requestId());
-        LineState next = status == RequestStatus.COMPLETED ? r.action().target() : r.previousState();
+        LineState next = status == RequestStatus.COMPLETED ? r.action().target(r.previousState()) : r.previousState();
+        if (status == RequestStatus.COMPLETED && r.action() == RequestAction.SWITCH_PROFILE && r.profile() != null) {
+            jdbc.update("UPDATE line SET profile = ?, updated_at = now() WHERE iccid = ?", r.profile(), r.iccid());
+        }
         List<LineChange> changes = new ArrayList<>();
         Map<String, Object> details = new LinkedHashMap<>();
         details.put("requestId", r.requestId().toString());
         details.put("action", r.action().name());
         if (reason != null) {
             details.put("reason", reason);
+        }
+        if (r.profile() != null) {
+            details.put("profile", r.profile());
+        }
+        if (r.jobId() != null) {
+            details.put("jobId", r.jobId().toString());
         }
         LineState after = lineStateNow;
         if (lineStateNow == LineState.PENDING) {
@@ -111,8 +122,11 @@ public class RequestStore {
                     Map.of("from", LineState.PENDING.name(), "to", next.name(), "requestId", r.requestId().toString())));
         }
         details.put("lineState", after.name());
+        // A bulk job tells the customer once when it ends, plus once per failed line (Flow E step 5),
+        // so its lines that succeed send no webhook of their own.
+        boolean notify = status == RequestStatus.FAILED || r.jobId() == null;
         changes.add(LineChange.of(r.iccid(), r.customerId(),
-                status == RequestStatus.COMPLETED ? ChangeKind.REQUEST_COMPLETED : ChangeKind.REQUEST_FAILED, true,
+                status == RequestStatus.COMPLETED ? ChangeKind.REQUEST_COMPLETED : ChangeKind.REQUEST_FAILED, notify,
                 eventId, at, details));
         return new Finished(r, after, changes);
     }

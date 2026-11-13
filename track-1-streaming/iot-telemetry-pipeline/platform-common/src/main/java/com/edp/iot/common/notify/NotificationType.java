@@ -20,7 +20,8 @@ public enum NotificationType {
     SIM_MOVED,
     LINE_STATE_CHANGED,
     OUTAGE_STARTED,
-    OUTAGE_ENDED;
+    OUTAGE_ENDED,
+    BULK_JOB_SUMMARY;
 
     /** The notification a change should produce, or empty when the customer is not told. */
     public static Optional<NotificationType> of(LineChange change) {
@@ -44,6 +45,7 @@ public enum NotificationType {
         return switch (notice.kind()) {
             case OUTAGE_STARTED -> OUTAGE_STARTED;
             case OUTAGE_ENDED -> OUTAGE_ENDED;
+            case BULK_JOB_SUMMARY -> BULK_JOB_SUMMARY;
         };
     }
 

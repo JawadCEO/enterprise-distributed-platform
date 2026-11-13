@@ -32,8 +32,14 @@ class NetworkClient {
     }
 
     Answer provision(LineCommand command) {
-        String body = Json.write(Map.of("requestId", command.requestId().toString(), "iccid", command.iccid(),
-                "action", command.action().name()));
+        Map<String, Object> fields = new java.util.LinkedHashMap<>();
+        fields.put("requestId", command.requestId().toString());
+        fields.put("iccid", command.iccid());
+        fields.put("action", command.action().name());
+        if (command.profile() != null) {
+            fields.put("profile", command.profile()); // SWITCH_PROFILE: the profile to download and enable
+        }
+        String body = Json.write(fields);
         HttpRequest request = HttpRequest.newBuilder(URI.create(props.networkUrl() + "/v1/provision"))
                 .timeout(props.callTimeout())
                 .header("Content-Type", "application/json")

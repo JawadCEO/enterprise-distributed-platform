@@ -17,7 +17,9 @@ public record CustomerNotice(UUID noticeId, String customerId, Kind kind, Instan
         /** A region went silent; one notice per customer instead of one offline alert per line (FR-21). */
         OUTAGE_STARTED,
         /** The region's traffic came back. */
-        OUTAGE_ENDED
+        OUTAGE_ENDED,
+        /** A bulk job finished: how many lines succeeded and failed (FR-9, Flow E step 5). */
+        BULK_JOB_SUMMARY
     }
 
     public CustomerNotice {
