@@ -15,7 +15,9 @@ x-service: &service
     KAFKA_PARTITIONS: "12"
     KAFKA_REPLICATION: "1"
     KAFKA_MIN_ISR: "1"
-    JAVA_OPTS: "-Xmx256m -XX:+UseSerialGC"
+    # Heap plus capped native memory (thread stacks, direct buffers, code cache, metaspace) stays
+    # inside mem_limit; without the caps event-ingest was OOM-killed at 5,000 events/s (part 5).
+    JAVA_OPTS: "-Xmx256m -XX:+UseSerialGC -Xss512k -XX:MaxDirectMemorySize=32m -XX:ReservedCodeCacheSize=48m -XX:MaxMetaspaceSize=128m"
     # Local development key only; set your own outside this laptop stack.
     IOT_OPERATOR_KEY: ${IOT_OPERATOR_KEY:-iot_localop_local-dev-only-operator-key}
   mem_limit: 400m
@@ -98,6 +100,7 @@ services:
     <<: *service
     build: { context: ., args: { MODULE: event-ingest } }
     image: iot/event-ingest
+    mem_limit: 512m
     ports:
       - "${IOT_INGEST_PORT:-18080}:8080"
     environment:
@@ -112,12 +115,13 @@ services:
     <<: *service
     build: { context: ., args: { MODULE: state-processor } }
     image: iot/state-processor
+    mem_limit: 512m
     ports:
       - "18081:8081"
     environment:
       <<: *service-env
       SERVER_PORT: "8081"
-      PROCESSOR_CONCURRENCY: "3"
+      PROCESSOR_CONCURRENCY: ${PROCESSOR_CONCURRENCY:-3}
     depends_on:
       kafka: { condition: service_healthy }
       customer-api: { condition: service_healthy }

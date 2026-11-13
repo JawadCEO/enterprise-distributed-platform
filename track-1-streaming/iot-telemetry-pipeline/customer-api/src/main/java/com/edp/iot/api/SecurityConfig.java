@@ -54,6 +54,21 @@ class SecurityConfig implements WebMvcConfigurer {
         };
     }
 
+    /**
+     * Seeds a network sender key from the environment. The two-region simulation (part 5) gives both
+     * regions the same key, so the simulator can fail over from one region's event-ingest to the
+     * other's without a new key.
+     */
+    @Bean
+    ApplicationRunner bootstrapNetworkKey(ApiKeys keys, @Value("${iot.security.bootstrap-network-key:}") String key) {
+        return args -> {
+            if (!key.isBlank()) {
+                keys.insertIfAbsent(key, ApiKeys.Role.NETWORK, null);
+                log.info("Bootstrap network key is registered");
+            }
+        };
+    }
+
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
         ApiKeys keys = apiKeys();

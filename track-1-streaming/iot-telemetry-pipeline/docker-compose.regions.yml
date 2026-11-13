@@ -1,0 +1,318 @@
+name: iot-regions
+# Two-region simulation (part 5): two complete regions, east and west, each with its own Kafka,
+# PostgreSQL, Redis, customer-api, event-ingest and state-processor. MirrorMaker 2 copies each
+# region's network.events to the other, so both regions hold every event. The simulator sends to
+# east and fails over to west when east stops answering.
+#
+#   docker compose -f docker-compose.regions.yml up -d --build
+#   docker compose -f docker-compose.regions.yml --profile sim run --rm -e MODE=register -e API_URL=http://customer-api-east:8084 network-simulator
+#   docker compose -f docker-compose.regions.yml --profile sim run --rm -e MODE=register -e API_URL=http://customer-api-west:8084 network-simulator
+#   docker compose -f docker-compose.regions.yml --profile drills run -d --rm --name drill drill
+#   docker compose -f docker-compose.regions.yml --profile sim run --rm network-simulator
+#
+# See docs/results/carrier-5-scale-*.md.
+
+x-service: &service
+  restart: unless-stopped
+  mem_limit: 512m
+  healthcheck: &health
+    test: ["CMD-SHELL", "wget -qO- http://localhost:$${SERVER_PORT:-8084}/actuator/health | grep -q UP"]
+    interval: 5s
+    timeout: 5s
+    retries: 60
+    start_period: 20s
+
+x-java: &java "-Xmx256m -XX:+UseSerialGC -Xss512k -XX:MaxDirectMemorySize=32m -XX:ReservedCodeCacheSize=48m -XX:MaxMetaspaceSize=128m"
+
+services:
+  kafka-east:
+    image: apache/kafka:3.8.0
+    hostname: kafka-east
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-east:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka-east:9093
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_HEAP_OPTS: "-Xmx512m -Xms512m"
+    mem_limit: 768m
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null 2>&1"]
+      interval: 5s
+      timeout: 10s
+      retries: 24
+
+  postgres-east:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: iot
+      POSTGRES_USER: iot
+      POSTGRES_PASSWORD: iot
+    command: ["postgres", "-c", "shared_buffers=128MB", "-c", "max_connections=100"]
+    mem_limit: 512m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U iot -d iot"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis-east:
+    image: redis:7.2-alpine
+    command: ["redis-server", "--maxmemory", "200mb", "--maxmemory-policy", "volatile-lru", "--save", ""]
+    mem_limit: 256m
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  customer-api-east:
+    <<: *service
+    image: iot/customer-api
+    build: { context: ., args: { MODULE: customer-api } }
+    ports:
+      - "18184:8084"
+    environment:
+      DB_URL: jdbc:postgresql://postgres-east:5432/iot
+      DB_USER: iot
+      DB_PASSWORD: iot
+      REDIS_HOST: redis-east
+      KAFKA_BOOTSTRAP: kafka-east:9092
+      KAFKA_PARTITIONS: "12"
+      KAFKA_REPLICATION: "1"
+      KAFKA_MIN_ISR: "1"
+      JAVA_OPTS: *java
+      IOT_OPERATOR_KEY: ${IOT_OPERATOR_KEY:-iot_localop_local-dev-only-operator-key}
+      IOT_NETWORK_KEY: ${IOT_NETWORK_KEY:-iot_localnet_local-dev-only-network-key}
+    depends_on:
+      postgres-east: { condition: service_healthy }
+      redis-east: { condition: service_healthy }
+      kafka-east: { condition: service_healthy }
+
+  event-ingest-east:
+    <<: *service
+    image: iot/event-ingest
+    build: { context: ., args: { MODULE: event-ingest } }
+    environment:
+      DB_URL: jdbc:postgresql://postgres-east:5432/iot
+      DB_USER: iot
+      DB_PASSWORD: iot
+      REDIS_HOST: redis-east
+      KAFKA_BOOTSTRAP: kafka-east:9092
+      KAFKA_PARTITIONS: "12"
+      KAFKA_REPLICATION: "1"
+      KAFKA_MIN_ISR: "1"
+      JAVA_OPTS: *java
+      IOT_OPERATOR_KEY: ${IOT_OPERATOR_KEY:-iot_localop_local-dev-only-operator-key}
+      IOT_NETWORK_KEY: ${IOT_NETWORK_KEY:-iot_localnet_local-dev-only-network-key}
+      SERVER_PORT: "8080"
+    depends_on:
+      customer-api-east: { condition: service_healthy }
+
+  # Reads its own region's events and the copy of the other region's.
+  state-processor-east:
+    <<: *service
+    image: iot/state-processor
+    build: { context: ., args: { MODULE: state-processor } }
+    environment:
+      DB_URL: jdbc:postgresql://postgres-east:5432/iot
+      DB_USER: iot
+      DB_PASSWORD: iot
+      REDIS_HOST: redis-east
+      KAFKA_BOOTSTRAP: kafka-east:9092
+      KAFKA_PARTITIONS: "12"
+      KAFKA_REPLICATION: "1"
+      KAFKA_MIN_ISR: "1"
+      JAVA_OPTS: *java
+      IOT_OPERATOR_KEY: ${IOT_OPERATOR_KEY:-iot_localop_local-dev-only-operator-key}
+      IOT_NETWORK_KEY: ${IOT_NETWORK_KEY:-iot_localnet_local-dev-only-network-key}
+      SERVER_PORT: "8081"
+      PROCESSOR_TOPICS: network.events,west.network.events
+      PROCESSOR_CONCURRENCY: "3"
+    depends_on:
+      customer-api-east: { condition: service_healthy }
+      mirror-maker: { condition: service_healthy }
+
+  kafka-west:
+    image: apache/kafka:3.8.0
+    hostname: kafka-west
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-west:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka-west:9093
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_HEAP_OPTS: "-Xmx512m -Xms512m"
+    mem_limit: 768m
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null 2>&1"]
+      interval: 5s
+      timeout: 10s
+      retries: 24
+
+  postgres-west:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: iot
+      POSTGRES_USER: iot
+      POSTGRES_PASSWORD: iot
+    command: ["postgres", "-c", "shared_buffers=128MB", "-c", "max_connections=100"]
+    mem_limit: 512m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U iot -d iot"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis-west:
+    image: redis:7.2-alpine
+    command: ["redis-server", "--maxmemory", "200mb", "--maxmemory-policy", "volatile-lru", "--save", ""]
+    mem_limit: 256m
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  customer-api-west:
+    <<: *service
+    image: iot/customer-api
+    build: { context: ., args: { MODULE: customer-api } }
+    ports:
+      - "18284:8084"
+    environment:
+      DB_URL: jdbc:postgresql://postgres-west:5432/iot
+      DB_USER: iot
+      DB_PASSWORD: iot
+      REDIS_HOST: redis-west
+      KAFKA_BOOTSTRAP: kafka-west:9092
+      KAFKA_PARTITIONS: "12"
+      KAFKA_REPLICATION: "1"
+      KAFKA_MIN_ISR: "1"
+      JAVA_OPTS: *java
+      IOT_OPERATOR_KEY: ${IOT_OPERATOR_KEY:-iot_localop_local-dev-only-operator-key}
+      IOT_NETWORK_KEY: ${IOT_NETWORK_KEY:-iot_localnet_local-dev-only-network-key}
+    depends_on:
+      postgres-west: { condition: service_healthy }
+      redis-west: { condition: service_healthy }
+      kafka-west: { condition: service_healthy }
+
+  event-ingest-west:
+    <<: *service
+    image: iot/event-ingest
+    build: { context: ., args: { MODULE: event-ingest } }
+    environment:
+      DB_URL: jdbc:postgresql://postgres-west:5432/iot
+      DB_USER: iot
+      DB_PASSWORD: iot
+      REDIS_HOST: redis-west
+      KAFKA_BOOTSTRAP: kafka-west:9092
+      KAFKA_PARTITIONS: "12"
+      KAFKA_REPLICATION: "1"
+      KAFKA_MIN_ISR: "1"
+      JAVA_OPTS: *java
+      IOT_OPERATOR_KEY: ${IOT_OPERATOR_KEY:-iot_localop_local-dev-only-operator-key}
+      IOT_NETWORK_KEY: ${IOT_NETWORK_KEY:-iot_localnet_local-dev-only-network-key}
+      SERVER_PORT: "8080"
+    depends_on:
+      customer-api-west: { condition: service_healthy }
+
+  # Reads its own region's events and the copy of the other region's.
+  state-processor-west:
+    <<: *service
+    image: iot/state-processor
+    build: { context: ., args: { MODULE: state-processor } }
+    environment:
+      DB_URL: jdbc:postgresql://postgres-west:5432/iot
+      DB_USER: iot
+      DB_PASSWORD: iot
+      REDIS_HOST: redis-west
+      KAFKA_BOOTSTRAP: kafka-west:9092
+      KAFKA_PARTITIONS: "12"
+      KAFKA_REPLICATION: "1"
+      KAFKA_MIN_ISR: "1"
+      JAVA_OPTS: *java
+      IOT_OPERATOR_KEY: ${IOT_OPERATOR_KEY:-iot_localop_local-dev-only-operator-key}
+      IOT_NETWORK_KEY: ${IOT_NETWORK_KEY:-iot_localnet_local-dev-only-network-key}
+      SERVER_PORT: "8081"
+      PROCESSOR_TOPICS: network.events,east.network.events
+      PROCESSOR_CONCURRENCY: "3"
+    depends_on:
+      customer-api-west: { condition: service_healthy }
+      mirror-maker: { condition: service_healthy }
+
+  # Starts once both regions have created network.events, and is healthy once it has created the
+  # copies (east.network.events in west, west.network.events in east).
+  mirror-maker:
+    image: apache/kafka:3.8.0
+    restart: unless-stopped
+    command: ["/opt/kafka/bin/connect-mirror-maker.sh", "/mm2/mm2.properties"]
+    environment:
+      KAFKA_HEAP_OPTS: "-Xmx384m"
+    volumes:
+      - ./regions:/mm2:ro
+    mem_limit: 640m
+    depends_on:
+      event-ingest-east: { condition: service_healthy }
+      event-ingest-west: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka-west:9092 --list | grep -qx east.network.events && /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka-east:9092 --list | grep -qx west.network.events"]
+      interval: 5s
+      timeout: 20s
+      retries: 60
+      start_period: 20s
+
+  network-simulator:
+    profiles: ["sim"]
+    image: iot/network-simulator
+    build: { context: ., args: { MODULE: network-simulator } }
+    environment:
+      INGEST_URL: ${INGEST_URL:-http://event-ingest-east:8080,http://event-ingest-west:8080}
+      API_URL: ${API_URL:-http://customer-api-east:8084}
+      MODE: ${MODE:-traffic}
+      REGISTER: "false"
+      RECONCILE: "false"
+      WEBHOOKS: "false"
+      REQUEST_RATE: "0"
+      SCENARIO: ${SCENARIO:-steady}
+      LINES: ${LINES:-1000}
+      CUSTOMERS: ${CUSTOMERS:-5}
+      TICK_SECONDS: ${TICK_SECONDS:-1}
+      DURATION: ${DURATION:-180s}
+      GATEWAY_BATCH: ${GATEWAY_BATCH:-0}
+      LEDGER_FILE: /ledger/regions-ledger.csv
+      IOT_OPERATOR_KEY: ${IOT_OPERATOR_KEY:-iot_localop_local-dev-only-operator-key}
+      NETWORK_KEY: ${IOT_NETWORK_KEY:-iot_localnet_local-dev-only-network-key}
+      JAVA_OPTS: "-Xmx384m"
+    volumes:
+      - ./target/ledger:/ledger
+    mem_limit: 512m
+
+  # Takes the whole east region down at DRILL_AT and brings it back after DRILL_FOR.
+  drill:
+    profiles: ["drills"]
+    image: docker:27.3.1-cli
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./drills:/drills:ro
+    environment:
+      PROJECT: iot-regions
+      TARGET: ${TARGET:-kafka-east postgres-east redis-east customer-api-east event-ingest-east state-processor-east}
+      DRILL_AT: ${DRILL_AT:-60}
+      DRILL_FOR: ${DRILL_FOR:-60}
+      HOW: ${HOW:-kill}
+    entrypoint: ["sh", "/drills/drill.sh"]

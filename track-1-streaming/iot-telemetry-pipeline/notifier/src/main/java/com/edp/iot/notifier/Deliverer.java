@@ -35,8 +35,9 @@ import java.util.concurrent.atomic.AtomicInteger;
  *       flight, sent asynchronously with a timeout, so a slow or dead endpoint holds a few slots and
  *       no threads, and other customers' notifications keep flowing.</li>
  *   <li><b>Back-off:</b> a failed notification is retried with exponential back-off and jitter.
- *       An endpoint that keeps failing is also paused as a whole, so a dead endpoint costs one
- *       probe per back-off step rather than one request per notification.</li>
+ *       An endpoint that fails {@link #PAUSE_AFTER_FAILURES} times in a row is also paused as a
+ *       whole, so a dead endpoint costs one probe per back-off step rather than one request per
+ *       notification, while a flaky one keeps receiving.</li>
  *   <li><b>Parking:</b> a notification still failing after {@code retryFor} is parked. It stays
  *       readable, and can be sent again, through customer-api.</li>
  *   <li><b>Order per line:</b> a notification is claimed only when no earlier one for the same
@@ -95,7 +96,7 @@ class Deliverer {
     private Thread loop;
 
     /**
-     * Consecutive failed rounds of one endpoint, and when it may be tried again. The pause grows
+     * Failures of one endpoint in a row, and when it may be tried again. Once paused, the pause grows
      * once per round, not once per notification, so an endpoint that comes back is found again
      * within one back-off step.
      */
@@ -271,6 +272,13 @@ class Deliverer {
         health.remove(webhookId);
     }
 
+    /**
+     * Failures in a row, with no success in between, before the whole endpoint is paused. A flaky
+     * endpoint that fails one request in three keeps receiving (each failed notification still backs
+     * off on its own); pausing it on every failure cut its throughput to a few a second (part 5).
+     */
+    static final int PAUSE_AFTER_FAILURES = 5;
+
     private void unhealthy(UUID webhookId) {
         EndpointHealth h = health.computeIfAbsent(webhookId, k -> new EndpointHealth());
         synchronized (h) {
@@ -279,7 +287,9 @@ class Deliverer {
                 return; // another request of the same round failed first; the pause already covers it
             }
             h.consecutiveFailures++;
-            h.pausedUntil = now + backoff.after(h.consecutiveFailures).toMillis();
+            if (h.consecutiveFailures >= PAUSE_AFTER_FAILURES) {
+                h.pausedUntil = now + backoff.after(h.consecutiveFailures - PAUSE_AFTER_FAILURES + 1).toMillis();
+            }
         }
     }
 

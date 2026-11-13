@@ -43,6 +43,7 @@ iot:
     min-insync-replicas: ${KAFKA_MIN_ISR:1}
   security:
     bootstrap-operator-key: ${IOT_OPERATOR_KEY:}
+    bootstrap-network-key: ${IOT_NETWORK_KEY:}
 
 management:
   health:

@@ -47,7 +47,10 @@ public class EventListener {
         this.propagator = propagator;
     }
 
-    @KafkaListener(topics = Topics.NETWORK_EVENTS, groupId = "state-processor", containerFactory = "eventBatchFactory",
+    // network.events, plus in a multi-region setup the other region's events replicated here
+    // (HLD section 7), for example "west.network.events".
+    @KafkaListener(topics = "#{'${iot.state.topics:network.events}'.split(',')}", groupId = "state-processor",
+            containerFactory = "eventBatchFactory",
             concurrency = "${iot.state.concurrency:3}")
     public void onBatch(List<ConsumerRecord<String, String>> records) {
         metrics.batch(records.size());

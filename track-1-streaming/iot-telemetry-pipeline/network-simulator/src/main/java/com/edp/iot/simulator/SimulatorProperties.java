@@ -29,6 +29,10 @@ public record SimulatorProperties(
         @DefaultValue("42") long seed,
         @DefaultValue("200") int maxConcurrentRequests,
         @DefaultValue("100") int maxBatch,
+        /* Load benchmark (part 5): above 0, one sender packs up to this many events from many lines into each
+           request, the way a network element or device gateway batches, instead of one request per line.
+           event-ingest takes at most 100 events per request. */
+        @DefaultValue("0") int gatewayBatch,
         @DefaultValue("true") boolean register,
         @DefaultValue("true") boolean reconcile,
         @DefaultValue("120s") Duration reconcileTimeout,

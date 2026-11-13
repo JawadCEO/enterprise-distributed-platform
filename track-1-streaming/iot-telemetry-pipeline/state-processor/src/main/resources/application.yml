@@ -41,6 +41,7 @@ spring:
 iot:
   state:
     concurrency: ${PROCESSOR_CONCURRENCY:3}
+    topics: ${PROCESSOR_TOPICS:network.events}
     partitions: ${KAFKA_PARTITIONS:12}
     replication-factor: ${KAFKA_REPLICATION:1}
     min-insync-replicas: ${KAFKA_MIN_ISR:1}

@@ -66,6 +66,7 @@ final class TrafficEngine {
         this.scenario = Scenario.of(props);
         this.http = http;
         this.networkKey = networkKey;
+        this.ingestUrls = props.ingestUrl().split(",");
         this.random = new Random(props.seed());
         this.concurrency = new Semaphore(props.maxConcurrentRequests());
         this.keepAliveWindowMs = registrar.keepAliveSeconds() * 1000L;
@@ -117,6 +118,13 @@ final class TrafficEngine {
         scheduler.scheduleAtFixedRate(() -> log.info(stats.line((System.currentTimeMillis() - start) / 1000.0)),
                 5, 5, TimeUnit.SECONDS);
         scheduler.scheduleWithFixedDelay(this::flushLedger, 1, 1, TimeUnit.SECONDS);
+        if (props.gatewayBatch() > 100) {
+            throw new IllegalArgumentException("GATEWAY_BATCH must be at most 100, event-ingest's limit per request");
+        }
+        if (props.gatewayBatch() > 0) {
+            log.info("Gateway mode: up to {} events from many lines per request", props.gatewayBatch());
+            scheduler.scheduleWithFixedDelay(this::sendReady, 10, 10, TimeUnit.MILLISECONDS);
+        }
 
         boolean[] outageLogged = {false, false};
         while (System.currentTimeMillis() < end) {
@@ -229,6 +237,10 @@ final class TrafficEngine {
     }
 
     private void trySend(SimLine line) {
+        if (props.gatewayBatch() > 0) {
+            ready(line);
+            return;
+        }
         List<SimLine.Event> batch;
         SimLine.Event lastAcked;
         String malformed = null;
@@ -271,7 +283,8 @@ final class TrafficEngine {
         }
 
         String body = "{\"events\":[" + String.join(",", payload) + "]}";
-        HttpRequest request = HttpRequest.newBuilder(URI.create(props.ingestUrl() + "/v1/events"))
+        int region = currentIngest.get();
+        HttpRequest request = HttpRequest.newBuilder(URI.create(ingestUrl(region) + "/v1/events"))
                 .timeout(Duration.ofSeconds(5))
                 .header("Content-Type", "application/json")
                 .header("Authorization", "ApiKey " + networkKey)
@@ -284,16 +297,22 @@ final class TrafficEngine {
                 .whenComplete((response, error) -> {
                     concurrency.release();
                     stats.recordLatency((System.nanoTime() - sentAt) / 1000);
-                    onResponse(line, order, response, error);
+                    onResponse(line, order, response, error, region);
                 });
     }
 
-    private void onResponse(SimLine line, List<SimLine.Event> sent, HttpResponse<String> response, Throwable error) {
+    private void onResponse(SimLine line, List<SimLine.Event> sent, HttpResponse<String> response, Throwable error, int region) {
+        JsonNode results = error != null || response == null ? null : parseResults(response.body());
+        requestOutcome(region, results == null);
+        onResults(line, sent, results);
+    }
+
+    /** Applies one line's results; {@code results} is null when the request failed as a whole. */
+    private void onResults(SimLine line, List<SimLine.Event> sent, JsonNode results) {
         long retryAfterMs = 0;
         boolean failed = false;
         synchronized (line) {
             line.inFlight = false;
-            JsonNode results = error != null || response == null ? null : parseResults(response.body());
             if (results == null) {
                 stats.requestErrors.increment();
                 failed = true;
@@ -346,6 +365,142 @@ final class TrafficEngine {
         if (pending(line) && (generating || retryAfterMs < 30_000)) {
             scheduleSend(line, retryAfterMs);
         }
+    }
+
+    // ---- failover across regions (part 5) ----
+
+    /** INGEST_URL may list several event-ingest addresses, one per region; the first is used until it fails. */
+    private final String[] ingestUrls;
+    private final java.util.concurrent.atomic.AtomicInteger currentIngest = new java.util.concurrent.atomic.AtomicInteger();
+    private final java.util.concurrent.atomic.AtomicInteger failuresInARow = new java.util.concurrent.atomic.AtomicInteger();
+    /** Whole requests failing in a row before the next region's event-ingest is tried. */
+    private static final int FAILOVER_AFTER = 20;
+
+    private String ingestUrl(int region) {
+        return ingestUrls[region % ingestUrls.length];
+    }
+
+    /**
+     * Counts whole-request failures against the region the request went to. Answers from a region the
+     * simulator already left are ignored, so requests still in flight to a dead region don't send it
+     * straight back there.
+     */
+    private void requestOutcome(int region, boolean failed) {
+        if (region != currentIngest.get()) {
+            return;
+        }
+        if (!failed) {
+            failuresInARow.set(0);
+            return;
+        }
+        if (ingestUrls.length > 1 && failuresInARow.incrementAndGet() >= FAILOVER_AFTER
+                && currentIngest.compareAndSet(region, region + 1)) {
+            failuresInARow.set(0);
+            log.warn("event-ingest at {} keeps failing; failing over to {}", ingestUrl(region), ingestUrl(region + 1));
+        }
+    }
+
+    // ---- gateway mode: many lines per request (load benchmark) ----
+
+    private final ConcurrentLinkedQueue<SimLine> readyLines = new ConcurrentLinkedQueue<>();
+    private final Set<SimLine> queued = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    private void ready(SimLine line) {
+        if (queued.add(line)) {
+            readyLines.add(line);
+        }
+    }
+
+    /** Packs the events of ready lines into requests of up to {@code gatewayBatch} events and sends them. */
+    private void sendReady() {
+        try {
+            List<SimLine> group = new ArrayList<>();
+            List<List<SimLine.Event>> parts = new ArrayList<>();
+            int events = 0;
+            int lines = readyLines.size();
+            for (int i = 0; i < lines; i++) {
+                SimLine line = readyLines.poll();
+                if (line == null) {
+                    break;
+                }
+                queued.remove(line);
+                synchronized (line) {
+                    long now = System.currentTimeMillis();
+                    if (line.inFlight || line.buffer.isEmpty()) {
+                        continue;
+                    }
+                    if (now < line.backoffUntil) {
+                        scheduleSend(line, line.backoffUntil - now);
+                        continue;
+                    }
+                    int take = Math.min(line.buffer.size(), Math.min(props.maxBatch(), props.gatewayBatch() - events));
+                    if (take <= 0) {
+                        ready(line);
+                        continue;
+                    }
+                    parts.add(new ArrayList<>(new ArrayList<>(line.buffer).subList(0, take)));
+                    line.inFlight = true;
+                    group.add(line);
+                    events += take;
+                }
+                if (events >= props.gatewayBatch()) {
+                    sendGroup(group, parts);
+                    group = new ArrayList<>();
+                    parts = new ArrayList<>();
+                    events = 0;
+                }
+            }
+            if (!group.isEmpty()) {
+                sendGroup(group, parts);
+            }
+        } catch (RuntimeException e) {
+            log.warn("Gateway send round failed: {}", e.toString());
+        }
+    }
+
+    private void sendGroup(List<SimLine> group, List<List<SimLine.Event>> parts) {
+        StringBuilder body = new StringBuilder("{\"events\":[");
+        boolean first = true;
+        for (List<SimLine.Event> part : parts) {
+            for (SimLine.Event e : part) {
+                if (!first) {
+                    body.append(',');
+                }
+                body.append(e.json());
+                first = false;
+            }
+        }
+        body.append("]}");
+        int region = currentIngest.get();
+        HttpRequest request = HttpRequest.newBuilder(URI.create(ingestUrl(region) + "/v1/events"))
+                .timeout(Duration.ofSeconds(5))
+                .header("Content-Type", "application/json")
+                .header("Authorization", "ApiKey " + networkKey)
+                .POST(HttpRequest.BodyPublishers.ofString(body.toString()))
+                .build();
+        concurrency.acquireUninterruptibly();
+        long sentAt = System.nanoTime();
+        http.sendAsync(request, HttpResponse.BodyHandlers.ofString())
+                .whenComplete((response, error) -> {
+                    concurrency.release();
+                    stats.recordLatency((System.nanoTime() - sentAt) / 1000);
+                    JsonNode results = error != null || response == null ? null : parseResults(response.body());
+                    requestOutcome(region, results == null);
+                    int offset = 0;
+                    for (int i = 0; i < group.size(); i++) {
+                        List<SimLine.Event> part = parts.get(i);
+                        JsonNode slice = null;
+                        if (results != null && results.size() >= offset + part.size()) {
+                            com.fasterxml.jackson.databind.node.ArrayNode a = com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.arrayNode();
+                            for (int j = 0; j < part.size(); j++) {
+                                a.add(results.get(offset + j));
+                            }
+                            slice = a;
+                        }
+                        offset += part.size();
+                        onResults(group.get(i), part, slice);
+                    }
+                });
     }
 
     private void scheduleSend(SimLine line, long delayMs) {
