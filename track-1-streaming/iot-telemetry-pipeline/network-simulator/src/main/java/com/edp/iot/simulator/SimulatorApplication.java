@@ -78,6 +78,7 @@ public class SimulatorApplication implements CommandLineRunner, ExitCodeGenerato
         RequestDriver requests = new RequestDriver(props, http, registrar, engine.lines(), props.seed() + 1);
         requests.start();
         engine.run();
+        java.time.Instant trafficEnd = java.time.Instant.now();
         log.info("Ledger of acknowledged events: {}", props.ledgerFile());
         RequestDriver.Report q = requests.finish();
         log.info("Request reconciliation: {} accepted, {} completed, {} failed as the network rejected, {} timed out, "
@@ -106,7 +107,7 @@ public class SimulatorApplication implements CommandLineRunner, ExitCodeGenerato
             return;
         }
         NotificationCheck.Report n = new NotificationCheck(props, http, registrar, receiver)
-                .run(runStart, engine.lines(), before, requests.tracked(), engine.outageWindow(), engine.outageLines());
+                .run(runStart, trafficEnd, engine.lines(), before, requests.tracked(), engine.outageWindow(), engine.outageLines());
         receiver.stop();
         log.info("Notification reconciliation: {} notifications ({} delivered, {} parked, {} pending), {} received "
                         + "({} more than once), {} refused by failing endpoints; {} delivered but not received, {} received but "

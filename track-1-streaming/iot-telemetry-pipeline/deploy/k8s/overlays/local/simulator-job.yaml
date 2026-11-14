@@ -1,0 +1,43 @@
+# One simulator traffic run, with its three reconciliations at the end. Not part of the overlay:
+#   kubectl -n iot delete job simulator --ignore-not-found
+#   kubectl -n iot apply -f overlays/local/simulator-job.yaml
+#   kubectl -n iot logs -f job/simulator
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: simulator
+  namespace: iot
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: simulator }
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: simulator
+          image: iot/network-simulator:local
+          imagePullPolicy: Never
+          env:
+            - { name: INGEST_URL, value: "http://event-ingest:8080" }
+            - { name: API_URL, value: "http://customer-api:8084" }
+            - { name: NETWORK_URL, value: "http://network:8090" }
+            - { name: SCENARIO, value: faults }
+            - { name: LINES, value: "1000" }
+            - { name: CUSTOMERS, value: "5" }
+            - { name: TICK_SECONDS, value: "10" }
+            - { name: DURATION, value: "300s" }
+            - { name: REQUEST_RATE, value: "3" }
+            - { name: LEDGER_FILE, value: /ledger/ack-ledger.csv }
+            - { name: JAVA_OPTS, value: "-Xmx384m" }
+            - name: IOT_OPERATOR_KEY
+              valueFrom:
+                secretKeyRef: { name: iot-secrets, key: IOT_OPERATOR_KEY }
+          resources:
+            requests: { cpu: 100m, memory: 512Mi }
+            limits: { memory: 512Mi }
+          volumeMounts:
+            - { name: ledger, mountPath: /ledger }
+      volumes:
+        - name: ledger
+          emptyDir: {}

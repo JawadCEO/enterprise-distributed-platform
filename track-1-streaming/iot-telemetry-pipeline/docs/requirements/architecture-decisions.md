@@ -47,6 +47,8 @@
 
 **Decision: the second option.** Three copies within a region, with a write confirmed by at least two. Duplicates after failover are already handled by ADR-002.
 
+**Amended after part 5:** the region-loss run showed the cost of "asynchronous across". Events a region acknowledged in the milliseconds before it died, and had not yet copied, reached the other region only when it came back. A region lost for good would lose them unless the device still holds them. So device resend is not optional: a device or the network keeps every event until the platform acknowledges it, and the acknowledgement must mean the event is in both regions before RPO = 0 holds for a permanent region loss. Until that confirmation exists, the honest figure is RPO = MirrorMaker lag for a region that never returns, and RPO = 0 for one that does.
+
 ## ADR-005: Ordering, reboots and late events
 
 | Option | For | Against |
@@ -87,3 +89,26 @@
 | Customers consume a Kafka topic directly | No webhook retries on our side | Exposes Kafka to customers; most can't consume it |
 
 **Decision:** a dedicated `notifier` reading `line.changes` and `customer.notices`, delivering at least once with a stable `notificationId`, signed with a secret per endpoint, with per-endpoint concurrency limits and back-off. Undeliverable notifications are parked and stay readable by API for 30 days.
+
+## ADR-009: Deployment and rollback
+
+| Option | For | Against |
+|---|---|---|
+| **Kubernetes with Kustomize: one base, an overlay per environment** | Plain YAML that `kubectl` applies; overlays show exactly what differs; no templating language | Less reuse than a chart; no packaged release history beyond Deployments' own |
+| Helm chart | Releases, values files, `helm rollback` | Templated YAML is hard to review; a second tool to run |
+| Docker Compose on VMs | Already used locally | No rolling updates, scheduling or self-healing across machines |
+
+**Decision: Kubernetes with Kustomize.** Every service is a Deployment updated with `maxSurge: 1` and `maxUnavailable: 0`: a new pod must pass its readiness probe before an old one is stopped, and the old one drains (a 5 s pre-stop pause so it leaves the Service, then Spring's graceful shutdown of up to 20 s, inside a 40 s grace period). A pod disruption budget keeps at least all but one running during node drains. Rollback is one step, `kubectl rollout undo`, because each Deployment keeps its last five revisions. Database changes are forward-only Flyway migrations owned by customer-api and must follow expand and contract: a migration only adds what the old version can ignore, and a later release removes what is no longer used, so rolling back the code never needs rolling back the schema.
+
+**Evidence:** both overlays pass server-side validation against a Kubernetes API server. A rolling replacement of every event-ingest, state-processor and notifier instance under traffic, run on Compose with the same surge-then-drain order, lost and duplicated nothing; see the [part 6 results](../results/carrier-6-kubernetes-2026-11-13.md).
+
+## ADR-010: Autoscaling signals
+
+| Option | For | Against |
+|---|---|---|
+| CPU for every service | Built into Kubernetes; no extra parts | A consumer falling behind is not always busy: lag grows while CPU looks normal |
+| **CPU for stateless HTTP services, consumer lag for Kafka consumers** | Each scales on the thing that means it is behind | Needs KEDA (or an external-metrics adapter) for lag |
+| Scheduled scaling | Predictable | Peaks move; an outage storm is not on any schedule |
+
+**Decision: the second option.** event-ingest scales on CPU at 50%, because each event costs about the same to accept; the other HTTP service, customer-api, has a fixed size until its load is measured. state-processor scales with KEDA on `network.events` lag for its consumer group, adding a pod for every 5,000 events behind. Its ceiling is set by the partitions, not by money: with 128 partitions and 3 consumer threads per pod, more than 43 pods would sit idle, so the maximum is 43, and growing past that means adding partitions first. The minimum of 2 per service keeps a rolling update and a lost node from ever leaving zero.
+

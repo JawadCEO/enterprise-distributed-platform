@@ -1,0 +1,54 @@
+# A whole platform on one local cluster (k3s, kind, Docker Desktop): the six services plus one
+# Kafka broker, PostgreSQL, Redis and the simulated network. Images are the ones docker compose
+# builds (iot/<service>), loaded into the cluster; see docs/results/carrier-6-kubernetes-*.md.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: iot
+resources:
+  - ../../base
+  - infrastructure.yaml
+  - network.yaml
+# Local development values only, the same ones docker-compose.yml uses. Production creates
+# iot-secrets itself (overlays/production).
+secretGenerator:
+  - name: iot-secrets
+    literals:
+      - DB_PASSWORD=iot
+      - IOT_OPERATOR_KEY=iot_localop_local-dev-only-operator-key
+generatorOptions:
+  disableNameSuffixHash: true
+configMapGenerator:
+  - name: iot-config
+    behavior: merge
+    literals:
+      # the simulated customers' endpoints are plain http inside the cluster; never set this elsewhere
+      - WEBHOOK_ALLOW_INSECURE_URLS=true
+images:
+  - { name: iot/customer-api, newTag: local }
+  - { name: iot/event-ingest, newTag: local }
+  - { name: iot/state-processor, newTag: local }
+  - { name: iot/presence-monitor, newTag: local }
+  - { name: iot/provisioning-worker, newTag: local }
+  - { name: iot/notifier, newTag: local }
+patches:
+  # one replica each and small requests, so the whole platform fits a laptop's cluster (about
+  # 7.5 GB for Docker Desktop); a rolling update still starts the new pod before stopping the old
+  - target: { kind: Deployment, labelSelector: "app.kubernetes.io/part-of=iot-carrier-platform" }
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 1
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/requests/cpu
+        value: 50m
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/requests/memory
+        value: 256Mi
+      - op: add
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: Never
+  - target: { kind: HorizontalPodAutoscaler }
+    patch: |-
+      - op: replace
+        path: /spec/minReplicas
+        value: 1

@@ -1,0 +1,14 @@
+# Scales state-processor on its consumer lag on network.events instead of CPU (phase plan: lag-based
+# autoscaling for the processor). Needs KEDA (keda.sh) installed in the cluster.
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+resources:
+  - scaled-object.yaml
+patches:
+  # KEDA makes its own HPA for the deployment; two autoscalers on one deployment would fight
+  - patch: |-
+      $patch: delete
+      apiVersion: autoscaling/v2
+      kind: HorizontalPodAutoscaler
+      metadata:
+        name: state-processor

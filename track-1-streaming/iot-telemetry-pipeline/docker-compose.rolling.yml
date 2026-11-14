@@ -1,0 +1,62 @@
+# Rolling-deploy drill (part 6): two instances each of event-ingest, state-processor and notifier,
+# with a load balancer in front of event-ingest like a Kubernetes Service, and a runner that replaces
+# every instance one at a time the way a Deployment's rolling update does (start a new one, wait
+# until it is healthy, then stop an old one with SIGTERM). The services shut down gracefully, as
+# deploy/k8s configures them.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.rolling.yml up -d --build --scale event-ingest=2 --scale state-processor=2 --scale notifier=2
+#   docker compose -f docker-compose.yml -f docker-compose.rolling.yml --profile drills run --no-deps -d --name rolling rolling
+#   docker compose -f docker-compose.yml -f docker-compose.rolling.yml --profile sim run --no-deps --rm -e SCENARIO=faults -e DURATION=300s network-simulator
+#
+# --no-deps matters: without it `run` can set a scaled dependency (event-ingest, notifier) back to one instance.
+#
+# See docs/results/carrier-6-kubernetes-*.md.
+
+x-graceful: &graceful
+  SERVER_SHUTDOWN: graceful
+  SPRING_LIFECYCLE_TIMEOUT_PER_SHUTDOWN_PHASE: 20s
+
+services:
+  ingest-lb:
+    image: nginx:1.27-alpine
+    ports:
+      - "${IOT_INGEST_PORT:-18080}:8080"
+    volumes:
+      - ./drills/ingest-lb.conf:/etc/nginx/conf.d/default.conf:ro
+    mem_limit: 64m
+    depends_on:
+      event-ingest: { condition: service_healthy }
+
+  event-ingest:
+    ports: !reset []
+    environment: *graceful
+    stop_grace_period: 40s
+  state-processor:
+    ports: !reset []
+    environment: *graceful
+    stop_grace_period: 40s
+  notifier:
+    ports: !reset []
+    environment: *graceful
+    stop_grace_period: 40s
+
+  network:
+    environment:
+      INGEST_URL: http://ingest-lb:8080
+  network-simulator:
+    environment:
+      INGEST_URL: http://ingest-lb:8080
+    depends_on:
+      ingest-lb: { condition: service_started }
+
+  rolling:
+    profiles: ["drills"]
+    image: docker:27.3.1-cli
+    working_dir: /project
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - .:/project:ro
+    environment:
+      SERVICES: ${SERVICES:-event-ingest state-processor notifier}
+      START_AT: ${START_AT:-60}
+    entrypoint: ["sh", "/project/drills/rolling.sh"]

@@ -1,0 +1,32 @@
+# The gateway scales on CPU. The processor scales on CPU here; components/keda-lag replaces this
+# with consumer lag, the signal the high-level design names, where KEDA is installed. Twelve
+# partitions with three consumer threads each means at most 4 processor replicas do work.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: event-ingest
+spec:
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: event-ingest }
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource: { name: cpu, target: { type: Utilization, averageUtilization: 50 } }
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: state-processor
+spec:
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: state-processor }
+  minReplicas: 2
+  maxReplicas: 4
+  metrics:
+    - type: Resource
+      resource: { name: cpu, target: { type: Utilization, averageUtilization: 50 } }
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300

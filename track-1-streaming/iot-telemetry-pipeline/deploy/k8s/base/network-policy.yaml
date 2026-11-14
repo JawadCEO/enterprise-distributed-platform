@@ -1,0 +1,29 @@
+# Nothing outside the namespace reaches a pod except the two public entry points. Pods inside the
+# namespace talk freely. Egress stays open: the notifier calls customers' https endpoints, and
+# WebhookUrlPolicy refuses private addresses.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: same-namespace-only
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: {}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: public-entry-points
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values: [event-ingest, customer-api]
+  policyTypes: [Ingress]
+  ingress:
+    - ports:
+        - port: 8080
+        - port: 8084

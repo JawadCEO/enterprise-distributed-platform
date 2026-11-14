@@ -1,0 +1,86 @@
+# Requests per pod at full scale (part 5 projection). Memory limits leave room for the 256 MB heap
+# plus capped native memory; raise -Xmx in JAVA_OPTS together with them.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: customer-api
+spec:
+  replicas: 3
+  template:
+    spec:
+      containers:
+        - name: customer-api
+          resources:
+            requests: { cpu: "1", memory: 1Gi }
+            limits: { memory: 1Gi }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: event-ingest
+spec:
+  replicas: 3
+  template:
+    spec:
+      containers:
+        - name: event-ingest
+          resources:
+            requests: { cpu: "2", memory: 1Gi }
+            limits: { memory: 1Gi }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: state-processor
+spec:
+  replicas: 2
+  template:
+    spec:
+      containers:
+        - name: state-processor
+          resources:
+            requests: { cpu: "2", memory: 1Gi }
+            limits: { memory: 1Gi }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: presence-monitor
+spec:
+  replicas: 2
+  template:
+    spec:
+      containers:
+        - name: presence-monitor
+          resources:
+            requests: { cpu: "500m", memory: 768Mi }
+            limits: { memory: 768Mi }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: provisioning-worker
+spec:
+  replicas: 2
+  template:
+    spec:
+      containers:
+        - name: provisioning-worker
+          resources:
+            requests: { cpu: "500m", memory: 768Mi }
+            limits: { memory: 768Mi }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: notifier
+spec:
+  replicas: 3
+  template:
+    spec:
+      containers:
+        - name: notifier
+          resources:
+            requests: { cpu: "1", memory: 1Gi }
+            limits: { memory: 1Gi }

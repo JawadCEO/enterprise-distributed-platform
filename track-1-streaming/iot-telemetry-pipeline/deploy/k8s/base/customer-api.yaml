@@ -1,0 +1,112 @@
+# Customer API and the schema owner: Flyway runs on start, under its own lock, so two replicas starting together are safe.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: customer-api
+  labels:
+    app.kubernetes.io/name: customer-api
+spec:
+  replicas: 2
+  revisionHistoryLimit: 5          # kubectl rollout undo goes back one of these (NFR-22)
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: customer-api
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0            # a new pod is ready before an old one stops
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: customer-api
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8084"
+        prometheus.io/path: /actuator/prometheus
+    spec:
+      terminationGracePeriodSeconds: 40
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 100
+        runAsGroup: 101
+        seccompProfile: { type: RuntimeDefault }
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: customer-api
+      containers:
+        - name: customer-api
+          image: iot/customer-api
+          ports:
+            - name: http
+              containerPort: 8084
+          envFrom:
+            - configMapRef:
+                name: iot-config
+          env:
+            - name: SERVER_PORT
+              value: "8084"
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: iot-secrets, key: DB_PASSWORD }
+            - name: IOT_OPERATOR_KEY
+              valueFrom:
+                secretKeyRef: { name: iot-secrets, key: IOT_OPERATOR_KEY }
+          resources:
+            requests: { cpu: 250m, memory: 512Mi }
+            limits: { memory: 512Mi }
+          startupProbe:
+            httpGet: { path: /actuator/health/liveness, port: http }
+            periodSeconds: 3
+            failureThreshold: 60
+          livenessProbe:
+            httpGet: { path: /actuator/health/liveness, port: http }
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: { path: /actuator/health/readiness, port: http }
+            periodSeconds: 5
+            failureThreshold: 2
+          lifecycle:
+            # let the Service stop routing here before the JVM starts shutting down
+            preStop:
+              exec: { command: ["sleep", "5"] }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: { sizeLimit: 64Mi }
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: customer-api
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: customer-api
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: customer-api
+  labels:
+    app.kubernetes.io/name: customer-api
+spec:
+  selector:
+    app.kubernetes.io/name: customer-api
+  ports:
+    - name: http
+      port: 8084
+      targetPort: http

@@ -1,0 +1,57 @@
+# One production region. Kafka, PostgreSQL and Redis are managed services (for example MSK, RDS
+# and ElastiCache); set their addresses below. The Secret iot-secrets (DB_PASSWORD,
+# IOT_OPERATOR_KEY) is created outside the repository, for example by External Secrets from the
+# cloud's secret store (NFR-17). Sizes follow the part 5 projection: about 100 vCPU per region at
+# 50,000 events/s with every component at or under 50% CPU.
+#
+#   kustomize edit set image iot/event-ingest=<registry>/iot/event-ingest:<version>   (each service)
+#   kubectl apply -k overlays/production
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: iot
+resources:
+  - ../../base
+components:
+  - ../../components/keda-lag
+configMapGenerator:
+  - name: iot-config
+    behavior: merge
+    literals:
+      - DB_URL=jdbc:postgresql://iot-db.region.internal:5432/iot?sslmode=require
+      - REDIS_HOST=iot-cache.region.internal
+      - KAFKA_BOOTSTRAP=b-1.iot-kafka.region.internal:9092,b-2.iot-kafka.region.internal:9092,b-3.iot-kafka.region.internal:9092
+      - KAFKA_PARTITIONS=128
+      - KAFKA_REPLICATION=3
+      - KAFKA_MIN_ISR=2
+      - NETWORK_URL=https://provisioning.network.internal
+images:
+  - { name: iot/customer-api, newName: registry.example.com/iot/customer-api, newTag: "0.1.0" }
+  - { name: iot/event-ingest, newName: registry.example.com/iot/event-ingest, newTag: "0.1.0" }
+  - { name: iot/state-processor, newName: registry.example.com/iot/state-processor, newTag: "0.1.0" }
+  - { name: iot/presence-monitor, newName: registry.example.com/iot/presence-monitor, newTag: "0.1.0" }
+  - { name: iot/provisioning-worker, newName: registry.example.com/iot/provisioning-worker, newTag: "0.1.0" }
+  - { name: iot/notifier, newName: registry.example.com/iot/notifier, newTag: "0.1.0" }
+patches:
+  # spread every service across availability zones, so losing a zone loses at most a third of it
+  - target: { kind: Deployment }
+    patch: |-
+      - op: add
+        path: /spec/template/spec/topologySpreadConstraints/-
+        value:
+          maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: DoNotSchedule
+          # each pod is spread against the pods of its own service
+          labelSelector:
+            matchExpressions:
+              - { key: app.kubernetes.io/part-of, operator: Exists }
+          matchLabelKeys: [app.kubernetes.io/name]
+  - path: sizes.yaml
+  - target: { kind: HorizontalPodAutoscaler, name: event-ingest }
+    patch: |-
+      - op: replace
+        path: /spec/minReplicas
+        value: 3
+      - op: replace
+        path: /spec/maxReplicas
+        value: 14
