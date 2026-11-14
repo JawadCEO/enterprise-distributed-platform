@@ -39,6 +39,8 @@ All six were replaced in 91 s. The simulator saw 0 send errors and 0 retries for
 - **A false alarm in the simulator's own check.** The first run failed on 15 outage notices with no outage in the scenario. They came after traffic stopped: the request check waits up to two minutes for the last requests, every region was silent by then, and presence-monitor rightly called that an outage (5 customers times 3 regions). The check now counts only outage notices raised while traffic was running. The platform did nothing wrong.
 - **`docker compose run` can undo scaling.** In the first two runs event-ingest and notifier had one instance, not two, because `run` without `--no-deps` set them back to one when it started their dependents. Those runs still passed with one instance each replaced; the third, above, used `--no-deps` and had two of each. The commands below include it.
 
+- **Found on the laptop cluster: Service environment variables.** On Docker Desktop's Kubernetes, customer-api crashed at startup with `Could not bind properties to 'RedisProperties'`. Kubernetes gives every pod a `REDIS_PORT=tcp://10.x.x.x:6379` variable for the `redis` Service, and the services read `REDIS_PORT` as the port number. Every pod now sets `enableServiceLinks: false`. Server-side validation cannot catch this; only running pods shows it.
+
 ## Autoscaling
 
 | Service | Signal | Range |

@@ -13,6 +13,9 @@ spec:
     metadata:
       labels: { app.kubernetes.io/name: kafka }
     spec:
+      # Kubernetes would set REDIS_PORT, KAFKA_PORT and the like to tcp://host:port for
+      # every Service, which overrides the settings of the same name and breaks startup
+      enableServiceLinks: false
       containers:
         - name: kafka
           image: apache/kafka:3.8.0
@@ -67,6 +70,9 @@ spec:
     metadata:
       labels: { app.kubernetes.io/name: postgres }
     spec:
+      # Kubernetes would set REDIS_PORT, KAFKA_PORT and the like to tcp://host:port for
+      # every Service, which overrides the settings of the same name and breaks startup
+      enableServiceLinks: false
       containers:
         - name: postgres
           image: postgres:16-alpine
@@ -113,6 +119,9 @@ spec:
     metadata:
       labels: { app.kubernetes.io/name: redis }
     spec:
+      # Kubernetes would set REDIS_PORT, KAFKA_PORT and the like to tcp://host:port for
+      # every Service, which overrides the settings of the same name and breaks startup
+      enableServiceLinks: false
       containers:
         - name: redis
           image: redis:7.2-alpine
