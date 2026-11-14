@@ -8,7 +8,7 @@ Part 6: Kubernetes manifests with autoscaling (lag-based for the processor), rol
 |---|---|---|
 | Manifests are valid | Both overlays accepted by a Kubernetes API server | Local: 33 objects plus the simulator job. Production: every object except the KEDA ScaledObject, whose type is not installed there. **PASS** |
 | Rolling deploy under traffic (NFR-22) | Every instance replaced, nothing lost or duplicated | 6 instances replaced during a 300 s faults run; 0 send errors; requests, usage and notifications all reconciled. **PASS** |
-| Pods running on Kubernetes | The same drill on a cluster | **Not run here.** See below; run it on the laptop |
+| Pods running on Kubernetes | The same drill on a cluster | On the laptop (Docker Desktop, Kubernetes 1.31): all pods ran, a rolling restart of event-ingest, state-processor and notifier during traffic lost and duplicated nothing, and `rollout undo` went back one step. **PASS** |
 
 ## What could not run here
 
@@ -41,6 +41,19 @@ All six were replaced in 91 s. The simulator saw 0 send errors and 0 retries for
 
 - **Found on the laptop cluster: Service environment variables.** On Docker Desktop's Kubernetes, customer-api crashed at startup with `Could not bind properties to 'RedisProperties'`. Kubernetes gives every pod a `REDIS_PORT=tcp://10.x.x.x:6379` variable for the `redis` Service, and the services read `REDIS_PORT` as the port number. Every pod now sets `enableServiceLinks: false`. Server-side validation cannot catch this; only running pods shows it.
 
+## On the laptop's Kubernetes
+
+Run on 2026-11-14 on Docker Desktop's Kubernetes (v1.31.4, one node), with the local overlay: one replica per service, Kafka, PostgreSQL, Redis and the simulated network in the cluster, and the faults simulator job (1,000 lines, 300 s, 3 requests/s).
+
+The first start found the Service environment variable problem described above; with `enableServiceLinks: false` every pod started.
+
+| Run | What happened during traffic | Requests | Usage | Notifications |
+|---|---|---|---|---|
+| 1 | Nothing; afterwards `rollout restart` of three services and `rollout undo` of state-processor, both completed | 820 accepted, 0 stuck, 0 wrong. **PASS** | 486,187,023 bytes acknowledged and counted. **PASS** | 1,688 delivered and received, 0 twice, 0 out of order. **PASS** |
+| 2 | `rollout restart` of event-ingest, state-processor and notifier about 57 s in (new ReplicaSets at 06:15:08 UTC, traffic 06:14 to 06:19) | 810 accepted, 768 completed, 37 rejected by the network, 5 timed out, 0 stuck, 0 wrong. **PASS** | 509,244,061 bytes acknowledged and counted. **PASS** | 845 delivered and received, 0 twice, 0 out of order, 0 bad signatures. **PASS** |
+
+In both runs the pending notifications (390 and 209) are all for customer-005, whose endpoint is down on purpose. Run 2 is NFR-22 on a real cluster: each restarted service had one replica, so every event went through a new pod starting and an old one draining.
+
 ## Autoscaling
 
 | Service | Signal | Range |
@@ -52,7 +65,7 @@ The lag trigger was validated as YAML only, since KEDA's type is not installed o
 
 ## Rollback
 
-Each Deployment keeps five revisions, so `kubectl rollout undo deploy/<service>` goes back one step. Migrations are forward-only and must follow expand and contract (ADR-009), so the previous code always runs on the newer schema. Not tested on a running cluster here.
+Each Deployment keeps five revisions, so `kubectl rollout undo deploy/<service>` goes back one step. Migrations are forward-only and must follow expand and contract (ADR-009), so the previous code always runs on the newer schema. On the laptop cluster, `kubectl rollout undo deploy/state-processor` returned it to its previous revision, with the old pod kept until the new one was ready.
 
 ## Run it on the laptop
 
