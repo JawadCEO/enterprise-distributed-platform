@@ -1,0 +1,30 @@
+# Phase 0 PoCs (docs/results/carrier-phase0-pocs-2026-11-14.md): adds an MQTT broker and turns on
+# event-ingest's MQTT path, next to its HTTP endpoint.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.pocs.yml up -d --build
+#   docker compose -f docker-compose.yml -f docker-compose.pocs.yml --profile sim run --no-deps --rm -e MODE=register -e LINES=500 -e TICK_SECONDS=1 network-simulator
+#   docker compose -f docker-compose.yml -f docker-compose.pocs.yml --profile sim run --no-deps --rm -e MODE=bench -e LINES=500 -e BENCH_PROTOCOL=mqtt -e BENCH_RATE=2000 -e DURATION=120s network-simulator
+#   docker compose -f docker-compose.yml -f docker-compose.pocs.yml --profile sim run --no-deps --rm -e POLL_SECONDS=30 -e DURATION=300s network-simulator
+
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2.0.20
+    volumes:
+      - ./drills/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mosquitto_sub -t '$$SYS/broker/uptime' -C 1 -W 3 > /dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  event-ingest:
+    environment:
+      MQTT_ENABLED: "true"
+      MQTT_URL: tcp://mosquitto:1883
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+
+  network-simulator:
+    environment:
+      MQTT_URL: tcp://mosquitto:1883

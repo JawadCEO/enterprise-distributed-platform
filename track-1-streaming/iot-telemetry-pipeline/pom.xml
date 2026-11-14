@@ -36,6 +36,12 @@
 
     <dependencyManagement>
         <dependencies>
+            <!-- MQTT client for the HTTP vs MQTT test (Phase 0 PoC): event-ingest's MQTT path and the simulator's devices -->
+            <dependency>
+                <groupId>org.eclipse.paho</groupId>
+                <artifactId>org.eclipse.paho.client.mqttv3</artifactId>
+                <version>1.2.5</version>
+            </dependency>
             <dependency>
                 <groupId>com.edp.iot</groupId>
                 <artifactId>platform-common</artifactId>

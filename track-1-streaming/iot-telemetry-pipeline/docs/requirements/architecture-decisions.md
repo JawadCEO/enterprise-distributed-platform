@@ -35,7 +35,7 @@
 | MQTT first | The standard for real device fleets; persistent connections | Needs a broker and connection-state handling; harder to benchmark |
 | Both from the start | Most realistic | Doubles the gateway work before the pipeline exists |
 
-**Decision: HTTP first.** The gateway's core takes a protocol-neutral event, so an MQTT adapter can be added without touching the pipeline. To be confirmed by the HTTP vs MQTT PoC before Phase 0 closes.
+**Decision: HTTP first.** The gateway's core takes a protocol-neutral event, so an MQTT adapter can be added without touching the pipeline. Confirmed by the [HTTP vs MQTT PoC](../results/carrier-phase0-pocs-2026-11-14.md): batched HTTP used the least CPU per event, MQTT gave devices the fastest acknowledgement, and neither lost an event when 10% of devices dropped at once. The MQTT adapter now exists in event-ingest, off by default (`MQTT_ENABLED`).
 
 ## ADR-004: Durability and cross-region loss
 
