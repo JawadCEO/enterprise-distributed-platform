@@ -1,0 +1,39 @@
+# Everything one tenant gets (FR-17). A tenant file in tenants/<cluster>/
+# overrides these; the platform sets cluster, appsDomain, repoURL,
+# targetRevision and basePath through the tenants ApplicationSet.
+
+name: ""              # namespace and tenant name, e.g. team-a
+owner: ""             # team contact, copied into labels
+size: small           # small | medium | large, see quotas below
+groups: []            # identity-provider groups given edit access
+
+# Repositories this tenant's ArgoCD project may deploy from.
+sourceRepos: []
+
+# Applications deployed into the tenant namespace, in the tenant's project.
+# Each: { name, path, repoURL?, targetRevision? }. path is relative to basePath
+# when repoURL is omitted.
+apps: []
+
+secrets:
+  enabled: true
+  # Local cluster only: test key/value pairs for the fake provider.
+  localTestData: []
+
+# Set by the platform.
+cluster: ""
+appsDomain: ""
+repoURL: ""
+targetRevision: main
+basePath: ""
+awsAccountId: ""      # dev/prod only: account that holds the tenant's secrets role
+
+quotas:
+  small:  { cpu: "2", memory: 4Gi,  pods: "20", services: "10" }
+  medium: { cpu: "4", memory: 8Gi,  pods: "40", services: "20" }
+  large:  { cpu: "8", memory: 16Gi, pods: "80", services: "40" }
+
+# Applied to any container that does not set its own (LimitRange).
+defaultContainer:
+  request: { cpu: 50m, memory: 64Mi }
+  limit:   { cpu: 500m, memory: 256Mi }

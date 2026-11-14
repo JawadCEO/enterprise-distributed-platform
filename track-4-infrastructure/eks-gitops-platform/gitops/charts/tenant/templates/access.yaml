@@ -1,0 +1,20 @@
+{{- if .Values.groups }}
+# Tenant groups may edit their own namespace and nothing else.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: tenant-edit
+  namespace: {{ .Values.name }}
+  labels:
+    {{- include "tenant.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: edit
+subjects:
+  {{- range .Values.groups }}
+  - kind: Group
+    apiGroup: rbac.authorization.k8s.io
+    name: {{ . }}
+  {{- end }}
+{{- end }}

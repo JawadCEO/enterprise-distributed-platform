@@ -1,0 +1,21 @@
+# Local cluster for Phases 2, 3 and 6. Fits the 16GB laptop budget (NFR-6).
+# k3s ships a network policy controller, so tenant isolation tests are real (FR-18).
+apiVersion: k3d.io/v1alpha5
+kind: Simple
+metadata:
+  name: eks-gitops
+servers: 1
+agents: 1
+image: rancher/k3s:v1.31.4-k3s1
+ports:
+  # Envoy Gateway's LoadBalancer service is exposed through k3d's load balancer.
+  - port: 8443:443
+    nodeFilters: [loadbalancer]
+  - port: 8080:80
+    nodeFilters: [loadbalancer]
+options:
+  k3s:
+    extraArgs:
+      # Envoy Gateway replaces the bundled Traefik ingress.
+      - arg: --disable=traefik
+        nodeFilters: [server:*]

@@ -1,0 +1,3 @@
+domainFilters:
+  - platform.example.com   # placeholder until open question 7 is answered
+txtOwnerId: eks-gitops-dev

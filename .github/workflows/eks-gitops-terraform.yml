@@ -1,0 +1,104 @@
+# eks-gitops-platform: Terraform plan on pull request, apply after approval (FR-15).
+#
+# AWS access is OIDC only; no keys are stored anywhere (NFR-7). Repository
+# variables (not secrets, since role ARNs are not credentials):
+#   EKS_GITOPS_ROLE_PLAN, EKS_GITOPS_ROLE_APPLY, EKS_GITOPS_STATE_BUCKET
+# GitHub environments aws-dev and aws-prod must have required reviewers:
+# approving the apply job is what starts a paid AWS session.
+name: eks-gitops terraform
+
+on:
+  pull_request:
+    paths:
+      - track-4-infrastructure/eks-gitops-platform/terraform/**
+  push:
+    branches: [main]
+    paths:
+      - track-4-infrastructure/eks-gitops-platform/terraform/envs/**
+      - track-4-infrastructure/eks-gitops-platform/terraform/modules/**
+  workflow_dispatch:
+    inputs:
+      environment:
+        type: choice
+        options: [dev, prod]
+        default: dev
+      action:
+        description: apply starts a session; destroy ends it (FR-26)
+        type: choice
+        options: [apply, destroy]
+        default: apply
+
+permissions:
+  contents: read
+  id-token: write        # OIDC token for AWS
+  pull-requests: write   # plan comment
+
+env:
+  TF_IN_AUTOMATION: "true"
+  STACKS: track-4-infrastructure/eks-gitops-platform/terraform/envs
+
+jobs:
+  plan:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        environment: [dev, prod]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with: { terraform_version: 1.10.5 }
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.EKS_GITOPS_ROLE_PLAN }}
+          aws-region: us-east-1
+      - name: Plan
+        id: plan
+        working-directory: ${{ env.STACKS }}/${{ matrix.environment }}
+        run: |
+          set -o pipefail
+          terraform init -input=false -backend-config="bucket=${{ vars.EKS_GITOPS_STATE_BUCKET }}"
+          terraform plan -input=false -no-color -lock-timeout=5m -out=tfplan | tee plan.txt
+      - name: Post the plan on the pull request
+        uses: actions/github-script@v7
+        env:
+          ENVIRONMENT: ${{ matrix.environment }}
+          PLAN_FILE: ${{ env.STACKS }}/${{ matrix.environment }}/plan.txt
+        with:
+          script: |
+            const fs = require('fs');
+            const plan = fs.readFileSync(process.env.PLAN_FILE, 'utf8');
+            const body = `#### Terraform plan: ${process.env.ENVIRONMENT}\n\`\`\`\n${plan.slice(-60000)}\n\`\`\``;
+            await github.rest.issues.createComment({ ...context.repo, issue_number: context.issue.number, body });
+
+  apply:
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    environment: aws-${{ inputs.environment || 'dev' }}
+    concurrency: eks-gitops-${{ inputs.environment || 'dev' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with: { terraform_version: 1.10.5 }
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.EKS_GITOPS_ROLE_APPLY }}
+          aws-region: us-east-1
+      - name: Terraform ${{ inputs.action || 'apply' }}
+        working-directory: ${{ env.STACKS }}/${{ inputs.environment || 'dev' }}
+        run: |
+          set -o pipefail   # a failed apply must fail the job despite tee
+          start=$(date +%s)
+          terraform init -input=false -backend-config="bucket=${{ vars.EKS_GITOPS_STATE_BUCKET }}"
+          if [ "${{ inputs.action }}" = "destroy" ]; then
+            terraform destroy -input=false -auto-approve -lock-timeout=5m
+          else
+            terraform apply -input=false -auto-approve -lock-timeout=5m -no-color | tee apply.log
+          fi
+          echo "### Terraform ${{ inputs.action || 'apply' }} took $(( $(date +%s) - start ))s" >> "$GITHUB_STEP_SUMMARY"
+          if [ -f apply.log ]; then
+            # Time per stage for the provisioning target (NFR-1).
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            "$GITHUB_WORKSPACE/track-4-infrastructure/eks-gitops-platform/scripts/summarize-apply-log.sh" apply.log >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          fi

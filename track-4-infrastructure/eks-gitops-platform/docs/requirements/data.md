@@ -19,7 +19,7 @@ This project has no business data. What it handles is **desired state** (code an
 | **We process** | Plan and apply infrastructure | Terraform, run by CI |
 | | Reconcile cluster against Git | ArgoCD |
 | | Admit or reject each workload | Gatekeeper |
-| | Create DNS records, certificates, load balancers, nodes | ExternalDNS, cert-manager, ingress controller, autoscaler |
+| | Create DNS records, certificates, load balancers, nodes | ExternalDNS, cert-manager, AWS Load Balancer Controller, autoscaler |
 | | Copy secrets into namespaces | Secrets sync controller **[assumption: External Secrets Operator]** |
 | | Collect and evaluate metrics | Prometheus |
 | **We give back** | Plan output on the pull request, pass or fail checks | To the author and reviewer |
@@ -42,7 +42,7 @@ flowchart LR
     Argo -->|apply| K8s[Kubernetes API]
     K8s -->|admission check| GK[Gatekeeper]
     SM[(Secrets Manager)] -->|synced by role| K8s
-    K8s --> Addons[ExternalDNS, cert-manager, ingress]
+    K8s --> Addons[ExternalDNS, cert-manager, load balancer controller]
     Addons --> R53[DNS records, certificates, load balancer]
     Users[Application users] -->|HTTPS| R53
     K8s --> Prom[Prometheus]
@@ -65,7 +65,7 @@ flowchart LR
 
 ### F2. Bootstrap (once per cluster)
 
-1. After F1 creates the cluster, an engineer runs the bootstrap command through AWS Systems Manager on a small instance inside the VPC **[assumption, question 4]**.
+1. After F1 creates the cluster, an engineer runs the bootstrap command through AWS Systems Manager on a small instance inside the VPC **[assumption, question 4]**. The instance acts through its own instance role, which has cluster-admin access only for the bootstrap; that access is removed afterwards and the same path is reused for break-glass access (F12).
 2. Bootstrap installs ArgoCD and one root application pointing at the Git repository.
 3. From here on, no command touches the cluster directly.
 
@@ -73,7 +73,7 @@ flowchart LR
 
 ### F3. Reconciliation (continuous)
 
-1. ArgoCD fetches the repository on a fixed interval or on a webhook.
+1. ArgoCD polls the repository every 3 minutes. A Git webhook is not used, because it cannot reach a private cluster without exposing ArgoCD.
 2. The root application expands into add-on, tenant, and application definitions (app-of-apps).
 3. ArgoCD applies them in order: namespaces and custom resource definitions first, then controllers, then policies, then tenants and their applications.
 4. Each object passes through admission (F5) before it is stored.
@@ -100,10 +100,10 @@ flowchart LR
 
 ### F6. Application exposure (HTTPS)
 
-1. A tenant application declares an ingress with a hostname under the platform domain.
-2. The ingress controller provisions or updates a load balancer.
+1. A tenant application declares a Gateway API route with a hostname under the platform domain.
+2. The AWS Load Balancer Controller provisions or updates a load balancer.
 3. ExternalDNS, using its own role, writes the DNS record in Route 53.
-4. cert-manager, using its own role, proves domain ownership with a DNS challenge and stores the certificate as a Kubernetes secret.
+4. cert-manager, using its own role, proves domain ownership with a DNS challenge and stores the certificate as a Kubernetes secret. Rebuild drills use the Let's Encrypt staging issuer, because production issues the same certificate at most 5 times a week; only the final measured run uses production.
 
 **Output:** a public HTTPS address with a valid certificate.
 
@@ -131,6 +131,38 @@ flowchart LR
 
 **Output:** no orphaned billable resources after teardown; a timed rebuild against NFR-1 and NFR-2.
 
+### F10. Tenant image build and push
+
+1. A tenant's own repository builds its container image in CI.
+2. CI pushes it to GitHub Container Registry under the owner's account **[assumption]**, tagged with the commit.
+3. The tenant opens a pull request changing the image tag in its application definition; after merge, F3 deploys it and F5 checks the registry is approved.
+
+**Output:** an approved, traceable image running in the tenant's namespace.
+
+### F11. Scheduled infrastructure drift check
+
+1. A scheduled CI run on main exchanges a GitHub token for the read-only drift role.
+2. It runs `terraform plan` against the current state.
+3. Any difference raises an alert and opens an issue; nothing is applied automatically.
+
+**Output:** infrastructure drift reported within 24 hours (NFR-5).
+
+### F12. Break-glass human access
+
+1. A platform engineer starts a Systems Manager session to the in-VPC instance, using their own short-lived AWS sign-in.
+2. From there they run `kubectl` against the private API with a time-limited access entry.
+3. The session is logged; any change they make is reverted by ArgoCD unless it is also merged to Git.
+
+**Output:** emergency access with no SSH keys, no public endpoint, and a full audit trail.
+
+### F13. Tenant offboarding
+
+1. A pull request removes the tenant's definition.
+2. ArgoCD deletes the tenant's applications first, so controllers remove its load balancer, DNS records, and certificates.
+3. ArgoCD then deletes the namespace, quota, policies, roles, and project; the tenant's secrets in Secrets Manager are deleted separately after a recovery window.
+
+**Output:** no leftover objects, records, or billable resources for the tenant.
+
 ## 5. Data inventory
 
 | Data | Description | Where it lives | Written by | Read by | Sensitivity |
@@ -141,6 +173,7 @@ flowchart LR
 | Policies and tests | Gatekeeper rules | Git | Security, platform | Gatekeeper, CI | Low |
 | Secrets | Database passwords, API tokens | AWS Secrets Manager, synced into the cluster | Engineers, tenants | Sync controller | High |
 | Identity mappings | Which service account may assume which AWS role | Terraform and Git | Platform engineers | IAM | Medium |
+| ArgoCD credentials | ArgoCD's access to the Git repositories and its own admin settings | Kubernetes secret, sourced from Secrets Manager; Git access by a read-only deploy key or GitHub App | Platform engineers | ArgoCD | High |
 | Cluster state | Live Kubernetes objects | etcd, managed by EKS, encrypted | ArgoCD, controllers | Everyone with access, by role | Medium |
 | Metrics | Cluster, add-on, tenant measurements | Prometheus | Prometheus | Grafana, alert rules | Low |
 | Logs | Application and platform logs | Log store chosen in Phase 6 | Workloads | Engineers, tenants by namespace | Medium |
@@ -168,3 +201,20 @@ Small. State files are kilobytes to a few megabytes. Git repositories are a few 
 | Logs | 7 days locally, 30 days on AWS **[assumption]** |
 | Cloud audit trail | 90 days **[assumption]** |
 | Git history | Permanent |
+
+## 9. Test data and workloads
+
+This project has no business dataset. It needs test workloads, test inputs, and failure injection.
+
+| Need | Choice |
+|---|---|
+| First tenant app, before the other projects exist | podinfo (stefanprodan/podinfo): small, exposes metrics and health checks, widely used in GitOps demos |
+| Second, heavier tenant for isolation and quota tests | Online Boutique (GoogleCloudPlatform/microservices-demo), on AWS only, since it is heavy for the laptop |
+| Real tenant | One of the other 7 projects in this portfolio |
+| Load to drive the autoscaler and alerts | k6 against podinfo |
+| Policy test cases | Gatekeeper library (open-policy-agent/gatekeeper-library) templates and their good and bad sample manifests, run with the gator CLI in CI |
+| Tenancy test | Three tenants: two normal ones and a noisy neighbour that tries to exceed its quota and reach the other tenants' pods |
+| Credential scanning test | AWS's documented example access key (`AKIAIOSFODNN7EXAMPLE`) planted in a test branch, which gitleaks must block |
+| Terraform checks | trivy config or checkov on every pull request |
+| Failure injection | Scripts: edit a managed resource with `kubectl`, break one add-on's values, delete a node, delete the cluster |
+| Cost figures | AWS Pricing Calculator before the first session, Cost Explorer after each |

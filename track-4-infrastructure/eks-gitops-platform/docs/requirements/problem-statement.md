@@ -10,9 +10,9 @@ Seven other projects in this portfolio are applications. Each needs somewhere to
 
 **Kubernetes environments built and changed by hand are not reproducible, not auditable, and not recoverable within a predictable time.** The underlying cause is that the true state of the environment lives in the cluster and in people's memory instead of in a reviewed, versioned definition.
 
-That one cause produces five observable failures:
+That one cause produces five observable failures. The last column describes the typical symptom in a hand-built setup; it is not a measurement. A real manual baseline (one console-built cluster, timed) is taken in the first AWS session.
 
-| # | Failure | Consequence | Measured today (manual baseline) |
+| # | Failure | Consequence | Typical symptom |
 |---|---|---|---|
 | P1 | **Drift.** Untracked changes make environments differ from each other and from any written description | A change that works in one environment fails in the next; nobody can say what is actually running | No drift detection; differences found only when something breaks |
 | P2 | **Slow provisioning.** A new environment needs a sequence of console steps and tickets | Days of lead time; each build is slightly different | Hours to days, not repeatable |
@@ -40,16 +40,17 @@ Each goal maps to a problem above and to a number that can be measured in Phase 
 | Goal | Addresses | Success criterion | How it is measured |
 |---|---|---|---|
 | G1 Reproducible environments | P1, P2 | Two builds from the same commit produce the same resource set; drift is detected within 24 hours and cluster drift is reverted within 5 minutes | Compare plan output after rebuild; inject a manual change and time the revert |
-| G2 Fast provisioning | P2 | Empty region (state backend and DNS zone already present) to a working cluster with all add-ons healthy in **< 15 minutes** | Timed CI run, 3 runs, report each |
+| G2 Fast provisioning | P2 | Empty region (state backend and DNS zone already present) to a working cluster with all add-ons healthy in **< 15 minutes** | Timed CI run, 3 runs, report each, with time per stage: network, control plane, nodes, add-ons, certificates. EKS control plane creation alone takes about 10 minutes, so the stage breakdown explains the result even if the target is missed |
 | G3 Bounded recovery | P5 | Fresh empty cluster to every add-on and application healthy in **< 10 minutes** **[assumption, question 1]** | Destroy-and-rebuild drill, timed from cluster ready to all ArgoCD apps Healthy and Synced |
 | G4 No static credentials | P3 | Zero long-lived cloud keys in repositories, CI settings, cluster secrets, or laptops | Secret scanner on the repositories, review of CI secrets, scan of cluster secrets |
 | G5 Self-service tenancy | P4 | A new team is onboarded by one merged pull request, with no manual step | Onboard a tenant and count manual actions (target 0) |
 | G6 Enforced guardrails | P4 | 100% of non-compliant test workloads rejected at admission; 0 compliant ones rejected | Policy test suite in CI plus a live admission test |
 | G7 Controlled cost | All | Spend stays under **$25 per month**, alarm before the limit **[assumption, question 2]** | AWS Budgets report |
+| G8 Tenant self-visibility | P4 | A tenant sees its own sync status, health, logs, and dashboards without asking the platform team, and cannot see other tenants' | Log in as a tenant and check what is visible |
 
 ## 6. Scope
 
-**In scope:** one AWS region, one EKS cluster per environment, Terraform modules, ArgoCD with an app-of-apps layout, platform add-ons (ingress, cert-manager, ExternalDNS, Prometheus and Grafana, Gatekeeper, node autoscaler, secrets sync), namespace tenancy, CI pipelines with OIDC, a recovery drill, and one of the other projects deployed as a tenant.
+**In scope:** one AWS region, one EKS cluster per environment, Terraform modules, ArgoCD with an app-of-apps layout, platform add-ons (AWS Load Balancer Controller with Gateway API, cert-manager, ExternalDNS, EBS storage driver, Prometheus and Grafana, Gatekeeper, node autoscaler, secrets sync), namespace tenancy, CI pipelines with OIDC, a recovery drill, and one of the other projects deployed as a tenant.
 
 ## 7. Non-goals
 
@@ -68,7 +69,7 @@ Each goal maps to a problem above and to a number that can be measured in Phase 
 
 | Constraint | Effect on the design |
 |---|---|
-| All local work happens on a 16GB laptop | The GitOps layer is built and tested on a local Kubernetes cluster (kind or k3d, about 4GB); AWS runs only in short sessions |
+| All local work happens on a 16GB laptop | The GitOps layer is built and tested on a local Kubernetes cluster (k3d, or kind with Calico, 6GB or less); AWS runs only in short sessions |
 | AWS bills by the hour | Every AWS session ends in a full destroy; a billing alarm exists before the first apply |
 | The private API endpoint blocks outside access | CI cannot reach the cluster API; ArgoCD pulls from inside; a one-time bootstrap path is needed **[assumption, question 4]** |
 | A registered domain is required for DNS and certificates | Domain choice is open **[question 7]** |
@@ -86,4 +87,4 @@ These stand in for open decisions until they are answered (see [open-questions.m
 | A4 | CI runs Terraform only; ArgoCD pulls from inside the cluster; the one-time bootstrap goes through AWS Systems Manager via a small instance in the VPC (question 4) |
 | A5 | Tenants are isolated by namespace in a shared cluster (question 5) |
 | A6 | Terraform is used, kept compatible with OpenTofu (question 6) |
-| A7 | A subdomain of a domain the owner already holds is delegated to Route 53 (question 7) |
+| A7 | No domain until one is named; the platform uses internal hostnames and its own CA (question 7, ADR-013) |

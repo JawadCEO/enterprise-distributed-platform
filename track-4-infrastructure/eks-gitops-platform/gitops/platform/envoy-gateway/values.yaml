@@ -1,0 +1,7 @@
+# Envoy Gateway implements Gateway API on every cluster (ADR-005).
+# The chart installs the Gateway API CRDs it needs.
+deployment:
+  envoyGateway:
+    resources:
+      requests: { cpu: 50m, memory: 128Mi }
+      limits: { memory: 512Mi }

@@ -1,0 +1,65 @@
+# FR-20, NFR-13: images only from approved registries, and never ":latest"
+# or untagged, so what runs is what was reviewed.
+apiVersion: templates.gatekeeper.sh/v1
+kind: ConstraintTemplate
+metadata:
+  name: k8sallowedrepos
+  annotations:
+    description: Rejects images outside the approved registry prefixes, and images tagged latest or untagged.
+spec:
+  crd:
+    spec:
+      names:
+        kind: K8sAllowedRepos
+      validation:
+        openAPIV3Schema:
+          type: object
+          properties:
+            repos:
+              type: array
+              items: { type: string }
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package k8sallowedrepos
+
+        import data.lib.pods
+
+        violation[{"msg": msg}] {
+          c := pods.containers[_]
+          not approved(c.image)
+          msg := sprintf("container <%v> image <%v> is not from an approved registry %v", [c.name, c.image, input.parameters.repos])
+        }
+
+        violation[{"msg": msg}] {
+          c := pods.containers[_]
+          not pinned(c.image)
+          msg := sprintf("container <%v> image <%v> must use a fixed tag or digest, not latest", [c.name, c.image])
+        }
+
+        approved(image) {
+          startswith(image, input.parameters.repos[_])
+        }
+
+        pinned(image) {
+          contains(image, "@sha256:")
+        }
+
+        pinned(image) {
+          not contains(image, "@")
+          parts := split(image, "/")
+          last := parts[count(parts) - 1]
+          contains(last, ":")
+          not endswith(last, ":latest")
+        }
+      libs:
+        - |
+          package lib.pods
+
+          spec := input.review.object.spec { input.review.object.kind == "Pod" }
+          spec := input.review.object.spec.template.spec { input.review.object.kind != "Pod"; input.review.object.spec.template }
+          spec := input.review.object.spec.jobTemplate.spec.template.spec { input.review.object.kind == "CronJob" }
+
+          containers[c] { c := spec.containers[_] }
+          containers[c] { c := spec.initContainers[_] }
+          containers[c] { c := spec.ephemeralContainers[_] }

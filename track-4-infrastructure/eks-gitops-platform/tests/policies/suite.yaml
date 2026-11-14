@@ -1,0 +1,59 @@
+# Policy tests (FR-21): every constraint has one allowed and at least one
+# rejected example. Run with: gator verify tests/policies/
+kind: Suite
+apiVersion: test.gatekeeper.sh/v1alpha1
+metadata:
+  name: platform-policies
+tests:
+  - name: no-privileged
+    template: ../../gitops/policies/templates/no-privileged.yaml
+    constraint: ../../gitops/policies/constraints/no-privileged.yaml
+    cases:
+      - name: compliant-deployment-is-allowed
+        object: samples/good-deployment.yaml
+        inventory: [samples/tenant-namespace.yaml]
+        assertions: [{ violations: no }]
+      - name: privileged-container-is-rejected
+        object: samples/bad-privileged.yaml
+        inventory: [samples/tenant-namespace.yaml]
+        assertions: [{ violations: yes }]
+  - name: required-resources
+    template: ../../gitops/policies/templates/required-resources.yaml
+    constraint: ../../gitops/policies/constraints/required-resources.yaml
+    cases:
+      - name: compliant-deployment-is-allowed
+        object: samples/good-deployment.yaml
+        inventory: [samples/tenant-namespace.yaml]
+        assertions: [{ violations: no }]
+      - name: missing-resources-is-rejected
+        object: samples/bad-no-limits.yaml
+        inventory: [samples/tenant-namespace.yaml]
+        assertions: [{ violations: yes }]
+  - name: allowed-repos
+    template: ../../gitops/policies/templates/allowed-repos.yaml
+    constraint: ../../gitops/policies/constraints/allowed-repos.yaml
+    cases:
+      - name: compliant-deployment-is-allowed
+        object: samples/good-deployment.yaml
+        inventory: [samples/tenant-namespace.yaml]
+        assertions: [{ violations: no }]
+      - name: unapproved-registry-is-rejected
+        object: samples/bad-registry.yaml
+        inventory: [samples/tenant-namespace.yaml]
+        assertions: [{ violations: yes }]
+      - name: latest-tag-is-rejected
+        object: samples/bad-latest.yaml
+        inventory: [samples/tenant-namespace.yaml]
+        assertions: [{ violations: yes }]
+  - name: required-labels
+    template: ../../gitops/policies/templates/required-labels.yaml
+    constraint: ../../gitops/policies/constraints/required-labels.yaml
+    cases:
+      - name: compliant-deployment-is-allowed
+        object: samples/good-deployment.yaml
+        inventory: [samples/tenant-namespace.yaml]
+        assertions: [{ violations: no }]
+      - name: missing-owner-label-is-rejected
+        object: samples/bad-no-labels.yaml
+        inventory: [samples/tenant-namespace.yaml]
+        assertions: [{ violations: yes }]

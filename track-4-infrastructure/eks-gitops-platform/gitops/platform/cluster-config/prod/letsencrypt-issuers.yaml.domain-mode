@@ -1,0 +1,26 @@
+# Let's Encrypt through DNS-01 in Route 53 (FR-11). cert-manager's AWS access
+# comes from EKS Pod Identity. Rebuild drills use staging, because production
+# issues the same certificate at most 5 times a week (FR-27).
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-staging
+spec:
+  acme:
+    server: https://acme-staging-v02.api.letsencrypt.org/directory
+    privateKeySecretRef: { name: letsencrypt-staging-account }
+    solvers:
+      - dns01:
+          route53: { region: us-east-1 }
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    privateKeySecretRef: { name: letsencrypt-account }
+    solvers:
+      - dns01:
+          route53: { region: us-east-1 }

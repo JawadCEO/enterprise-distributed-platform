@@ -1,0 +1,69 @@
+# Grafana dashboards (FR-22), picked up by the Grafana sidecar through the
+# grafana_dashboard label. Cluster-level views come with kube-prometheus-stack.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dashboard-platform-overview
+  namespace: monitoring
+  labels: { grafana_dashboard: "1" }
+data:
+  platform-overview.json: |
+    {
+      "title": "Platform overview",
+      "uid": "platform-overview",
+      "schemaVersion": 39,
+      "time": { "from": "now-6h", "to": "now" },
+      "panels": [
+        { "type": "stat", "title": "Applications Degraded", "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 },
+          "targets": [{ "expr": "sum(argocd_app_info{health_status=\"Degraded\"}) or vector(0)" }] },
+        { "type": "stat", "title": "Applications OutOfSync", "gridPos": { "x": 6, "y": 0, "w": 6, "h": 4 },
+          "targets": [{ "expr": "sum(argocd_app_info{sync_status=\"OutOfSync\"}) or vector(0)" }] },
+        { "type": "stat", "title": "Nodes Ready", "gridPos": { "x": 12, "y": 0, "w": 6, "h": 4 },
+          "targets": [{ "expr": "sum(kube_node_status_condition{condition=\"Ready\",status=\"true\"})" }] },
+        { "type": "stat", "title": "Days to first certificate expiry", "gridPos": { "x": 18, "y": 0, "w": 6, "h": 4 },
+          "targets": [{ "expr": "min(certmanager_certificate_expiration_timestamp_seconds - time()) / 86400" }] },
+        { "type": "table", "title": "Applications", "gridPos": { "x": 0, "y": 4, "w": 24, "h": 10 },
+          "targets": [{ "expr": "argocd_app_info", "format": "table", "instant": true }] },
+        { "type": "timeseries", "title": "Syncs by result", "gridPos": { "x": 0, "y": 14, "w": 24, "h": 8 },
+          "targets": [{ "expr": "sum by (phase) (increase(argocd_app_sync_total[15m]))", "legendFormat": "{{phase}}" }] }
+      ]
+    }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dashboard-tenant
+  namespace: monitoring
+  labels: { grafana_dashboard: "1" }
+data:
+  tenant.json: |
+    {
+      "title": "Tenant",
+      "uid": "tenant",
+      "schemaVersion": 39,
+      "time": { "from": "now-6h", "to": "now" },
+      "templating": { "list": [
+        { "name": "tenant", "type": "query", "label": "Tenant",
+          "query": "label_values(kube_resourcequota{resourcequota=\"tenant-quota\"}, namespace)", "refresh": 2 }
+      ] },
+      "panels": [
+        { "type": "timeseries", "title": "CPU used vs quota (cores)", "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+          "targets": [
+            { "expr": "sum(rate(container_cpu_usage_seconds_total{namespace=\"$tenant\",container!=\"\"}[5m]))", "legendFormat": "used" },
+            { "expr": "kube_resourcequota{namespace=\"$tenant\",resource=\"limits.cpu\",type=\"hard\"}", "legendFormat": "quota" }
+          ] },
+        { "type": "timeseries", "title": "Memory used vs quota", "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+          "fieldConfig": { "defaults": { "unit": "bytes" } },
+          "targets": [
+            { "expr": "sum(container_memory_working_set_bytes{namespace=\"$tenant\",container!=\"\"})", "legendFormat": "used" },
+            { "expr": "kube_resourcequota{namespace=\"$tenant\",resource=\"limits.memory\",type=\"hard\"}", "legendFormat": "quota" }
+          ] },
+        { "type": "gauge", "title": "Pods used of quota", "gridPos": { "x": 0, "y": 8, "w": 8, "h": 6 },
+          "fieldConfig": { "defaults": { "unit": "percentunit", "max": 1 } },
+          "targets": [{ "expr": "kube_resourcequota{namespace=\"$tenant\",resource=\"pods\",type=\"used\"} / ignoring(type) kube_resourcequota{namespace=\"$tenant\",resource=\"pods\",type=\"hard\"}" }] },
+        { "type": "timeseries", "title": "Container restarts", "gridPos": { "x": 8, "y": 8, "w": 16, "h": 6 },
+          "targets": [{ "expr": "sum by (pod) (increase(kube_pod_container_status_restarts_total{namespace=\"$tenant\"}[15m]))", "legendFormat": "{{pod}}" }] },
+        { "type": "table", "title": "Tenant applications", "gridPos": { "x": 0, "y": 14, "w": 24, "h": 6 },
+          "targets": [{ "expr": "argocd_app_info{project=\"$tenant\"}", "format": "table", "instant": true }] }
+      ]
+    }

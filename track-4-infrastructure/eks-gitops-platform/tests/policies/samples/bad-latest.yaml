@@ -1,0 +1,19 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: latest
+  namespace: team-a
+  labels: { app.kubernetes.io/name: good, owner: team-a }
+spec:
+  selector: { matchLabels: { app.kubernetes.io/name: good } }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: good, owner: team-a }
+    spec:
+      containers:
+        - name: app
+          image: ghcr.io/stefanprodan/podinfo:latest
+          resources:
+            requests: { cpu: 50m, memory: 32Mi }
+            limits: { memory: 128Mi }
+          securityContext: { allowPrivilegeEscalation: false }

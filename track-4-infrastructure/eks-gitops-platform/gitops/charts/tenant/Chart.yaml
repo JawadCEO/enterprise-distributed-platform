@@ -1,0 +1,5 @@
+apiVersion: v2
+name: tenant
+description: Namespace, quota, limits, network policies, access, ArgoCD project, secrets and applications for one tenant
+type: application
+version: 0.1.0

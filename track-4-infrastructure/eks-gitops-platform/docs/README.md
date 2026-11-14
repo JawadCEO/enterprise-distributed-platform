@@ -1,6 +1,6 @@
 # eks-gitops-platform
 
-**Status:** draft for discussion. No code yet.
+**Status:** all phases written; not yet run. Results go in [results](results/README.md).
 
 ## Documents
 
@@ -11,6 +11,12 @@
 | [Non-functional requirements and disaster recovery](requirements/non-functional-requirements.md) |
 | [Data and flows: what is received, processed, and returned](requirements/data.md) |
 | [Decisions still needed, with working assumptions](requirements/open-questions.md) |
+| [Architecture decisions (ADR-001 to ADR-013)](requirements/architecture-decisions.md) |
+| [Platform design (Phase 1)](architecture/high-level-design.md) |
+| [Runbook: local platform](runbooks/local.md) |
+| [Runbook: an AWS session](runbooks/aws-session.md) |
+| [Runbook: day-2 operations](runbooks/day-2.md) |
+| [Results](results/README.md) |
 
 ## Brief
 
@@ -43,7 +49,7 @@ This project has components, not microservices.
 |---|---|
 | Terraform modules | VPC, EKS, node groups, IAM and IRSA, DNS zone, state backend |
 | Bootstrap | Installs ArgoCD and points it at the root application |
-| Platform add-ons | Ingress controller, cert-manager, ExternalDNS, Prometheus and Grafana, Gatekeeper |
+| Platform add-ons | AWS Load Balancer Controller with Gateway API, cert-manager, ExternalDNS, EBS storage driver, Prometheus and Grafana, Gatekeeper, autoscaler, secrets sync |
 | Tenancy | Namespaces, quotas, network policies, ArgoCD projects per tenant |
 | CI pipelines | Plan and apply through GitHub OIDC, policy and security checks on pull requests |
 | Tenant workload | One of the other 7 projects deployed as proof |
@@ -54,8 +60,8 @@ The 9-phase framework is written for applications. This project has no database 
 
 | Phase | Focus for this project | Where it runs |
 |---|---|---|
-| 0 | Requirements and decisions: open questions answered, ADRs on ArgoCD against Flux and Terraform against OpenTofu, budget agreed | Docs |
-| 1 | Platform design: Git repository layout, app-of-apps structure, sync ordering, environments and promotion, secrets approach, tenancy model, policy set, Terraform module and state design | Docs |
+| 0 | Requirements and decisions: open questions answered, ADRs on ArgoCD against Flux (and self-managed against the EKS managed Argo CD capability) and Terraform against OpenTofu, budget agreed | Docs |
+| 1 | Platform design: Git repository layout, app-of-apps structure, sync ordering, environments and promotion, secrets approach, tenancy model, policy set, Terraform module and state design, ADRs on IRSA against EKS Pod Identity and on Gatekeeper failure mode | Docs |
 | 2 | GitOps layer locally: ArgoCD bootstrap, app-of-apps, add-ons that work without AWS (cert-manager, Prometheus and Grafana, Gatekeeper), drift revert | Local cluster |
 | 3 | Tenancy and policy locally: tenant onboarding by pull request, quotas, network policies, ArgoCD projects, Gatekeeper rules with CI tests | Local cluster |
 | 4 | AWS foundation: billing alarm first, state backend, VPC, private EKS, IAM roles for service accounts, Route 53 zone, CI through GitHub OIDC | AWS session |
@@ -66,7 +72,7 @@ The 9-phase framework is written for applications. This project has no database 
 
 ## Laptop fit (16GB)
 
-The GitOps layer (ArgoCD, add-ons, tenancy, policies) can be developed on a local Kubernetes cluster in about 4GB. The local cluster needs a network plugin that enforces network policies (for example k3d, or kind with Calico), or the tenancy tests in Phase 3 prove nothing. The AWS parts cannot run locally at all.
+The GitOps layer (ArgoCD, add-ons, tenancy, policies) can be developed on a local Kubernetes cluster in about 6GB or less. The local cluster needs a network plugin that enforces network policies (for example k3d, or kind with Calico), or the tenancy tests in Phase 3 prove nothing. The AWS parts cannot run locally at all.
 
 ## Risks and open questions
 

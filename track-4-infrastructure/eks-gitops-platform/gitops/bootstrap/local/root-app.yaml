@@ -1,0 +1,25 @@
+# The only Application applied by hand (scripts/bootstrap.sh local).
+# Everything else on the cluster is rendered by the root chart from Git.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: root
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/JawadCEO/enterprise-distributed-platform.git
+    targetRevision: main
+    path: track-4-infrastructure/eks-gitops-platform/gitops/root
+    helm:
+      valueFiles:
+        - values-local.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

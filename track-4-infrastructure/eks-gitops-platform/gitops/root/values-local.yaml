@@ -1,0 +1,14 @@
+# Local k3d cluster: everything that runs without AWS (Phases 2, 3, 6).
+cluster: local
+appsDomain: localtest.me   # *.localtest.me resolves to 127.0.0.1
+
+addons:
+  argocd:                 { chart: { version: "7.7.11" } }
+  envoy-gateway:          { chart: { version: "v1.2.4" } }
+  cert-manager:           { chart: { version: "v1.16.2" } }
+  external-secrets:       { chart: { version: "0.12.1" } }
+  kube-prometheus-stack:  { chart: { version: "66.3.1" } }
+  gatekeeper:             { chart: { version: "3.18.0" } }
+  loki:                         { chart: { version: "6.24.0" } }
+  alloy:                        { chart: { version: "0.10.1" } }
+  cluster-config:         { path: platform/cluster-config/local }

@@ -1,0 +1,44 @@
+# FR-20: no privileged containers, and no privilege escalation.
+apiVersion: templates.gatekeeper.sh/v1
+kind: ConstraintTemplate
+metadata:
+  name: k8snoprivileged
+  annotations:
+    description: Rejects pods with privileged containers or allowPrivilegeEscalation true.
+spec:
+  crd:
+    spec:
+      names:
+        kind: K8sNoPrivileged
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package k8snoprivileged
+
+        import data.lib.pods
+
+        violation[{"msg": msg}] {
+          c := pods.containers[_]
+          c.securityContext.privileged
+          msg := sprintf("container <%v> must not run privileged", [c.name])
+        }
+
+        violation[{"msg": msg}] {
+          c := pods.containers[_]
+          c.securityContext.allowPrivilegeEscalation
+          msg := sprintf("container <%v> must set allowPrivilegeEscalation: false", [c.name])
+        }
+      libs:
+        - |
+          package lib.pods
+
+          # Works for Pods and for anything with a pod template
+          # (Deployments, StatefulSets, Jobs, ...), so violations surface
+          # at the Deployment, where ArgoCD shows them.
+          spec := input.review.object.spec { input.review.object.kind == "Pod" }
+          spec := input.review.object.spec.template.spec { input.review.object.kind != "Pod"; input.review.object.spec.template }
+          spec := input.review.object.spec.jobTemplate.spec.template.spec { input.review.object.kind == "CronJob" }
+
+          containers[c] { c := spec.containers[_] }
+          containers[c] { c := spec.initContainers[_] }
+          containers[c] { c := spec.ephemeralContainers[_] }

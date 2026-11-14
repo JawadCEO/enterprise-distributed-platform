@@ -1,0 +1,9 @@
+{{- if not .Values.name }}{{ fail "name is required" }}{{ end }}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ .Values.name }}
+  labels:
+    {{- include "tenant.labels" . | nindent 4 }}
+    # Enforce the restricted Pod Security Standard as a second line of defence.
+    pod-security.kubernetes.io/enforce: restricted

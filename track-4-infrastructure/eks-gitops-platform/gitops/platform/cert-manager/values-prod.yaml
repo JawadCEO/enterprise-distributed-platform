@@ -1,0 +1,5 @@
+# On EKS, cert-manager answers DNS-01 challenges in Route 53 through
+# EKS Pod Identity (ADR-004). The association is created by Terraform for
+# service account cert-manager/cert-manager.
+serviceAccount:
+  name: cert-manager

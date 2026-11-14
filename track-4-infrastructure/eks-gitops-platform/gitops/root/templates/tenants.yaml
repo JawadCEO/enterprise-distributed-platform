@@ -1,0 +1,63 @@
+{{- /*
+One Application per tenant file in tenants/<cluster>/. Adding a file is the
+whole onboarding pull request (FR-17); deleting it offboards the tenant (FR-19).
+*/ -}}
+{{- if .Values.tenants.enabled }}
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: tenants
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: {{ .Values.tenants.wave | quote }}
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - git:
+        repoURL: {{ .Values.repoURL }}
+        revision: {{ .Values.targetRevision }}
+        files:
+          - path: {{ .Values.basePath }}/tenants/{{ .Values.cluster }}/*.yaml
+  template:
+    metadata:
+      name: 'tenant-{{ "{{" }} .name {{ "}}" }}'
+      labels:
+        platform/layer: tenant
+        platform/tenant: '{{ "{{" }} .name {{ "}}" }}'
+      finalizers:
+        - resources-finalizer.argocd.argoproj.io
+    spec:
+      project: default
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: '{{ "{{" }} .name {{ "}}" }}'
+      sources:
+        - repoURL: {{ .Values.repoURL }}
+          targetRevision: {{ .Values.targetRevision }}
+          path: {{ .Values.basePath }}/charts/tenant
+          helm:
+            releaseName: '{{ "{{" }} .name {{ "}}" }}'
+            valueFiles:
+              - '$values/{{ "{{" }} .path.path {{ "}}" }}/{{ "{{" }} .path.filename {{ "}}" }}'
+            parameters:
+              - name: cluster
+                value: {{ .Values.cluster }}
+              - name: appsDomain
+                value: {{ .Values.appsDomain }}
+              - name: repoURL
+                value: {{ .Values.repoURL }}
+              - name: targetRevision
+                value: {{ .Values.targetRevision }}
+              - name: basePath
+                value: {{ .Values.basePath }}
+              - name: awsAccountId
+                value: {{ .Values.awsAccountId | quote }}
+        - repoURL: {{ .Values.repoURL }}
+          targetRevision: {{ .Values.targetRevision }}
+          ref: values
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+{{- end }}

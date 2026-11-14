@@ -1,0 +1,9 @@
+# Onboarding team-a is this one file (FR-17). Its secrets live in
+# Secrets Manager under platform/<cluster>/team-a/.
+name: team-a
+owner: team-a@example.com
+size: small
+groups: [team-a]
+apps:
+  - name: podinfo
+    path: apps/podinfo

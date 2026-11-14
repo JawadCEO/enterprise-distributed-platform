@@ -1,0 +1,10 @@
+# Writes Route 53 records for Gateway API routes (FR-11).
+# AWS access through EKS Pod Identity, limited to the platform zone.
+serviceAccount:
+  name: external-dns
+provider:
+  name: aws
+sources:
+  - gateway-httproute
+policy: sync          # also deletes records of removed routes (FR-19)
+registry: txt

@@ -16,13 +16,14 @@ Each requirement states what the system shall do and how we will know it does it
 | F. Policy | FR-20 to FR-21 | G6 |
 | G. Observability and cost | FR-22 to FR-24 | G7 |
 | H. Lifecycle and recovery | FR-25 to FR-27 | G1, G3 |
+| I. Human access | FR-28 to FR-29 | G4, G8 |
 
 ## A. Cloud foundation
 
 | ID | Requirement | Acceptance criteria | Priority |
 |---|---|---|---|
 | FR-1 | The system shall provision a VPC with public and private subnets across at least 2 availability zones, from reusable Terraform modules | `terraform apply` creates the VPC; nodes run only in private subnets; load balancers only in public subnets | Must |
-| FR-2 | The system shall provision an EKS cluster with managed node groups and a private-only API endpoint | The API endpoint has no public access; nodes join the cluster; Kubernetes version is pinned in code | Must |
+| FR-2 | The system shall provision an EKS cluster with managed node groups and a private-only API endpoint | The API endpoint has no public access; nodes join the cluster; Kubernetes version is pinned in code; Terraform calls only AWS APIs and never the Kubernetes API (no Kubernetes or Helm provider), so CI works against a private endpoint and everything inside the cluster comes from ArgoCD | Must |
 | FR-3 | The system shall store Terraform state remotely with locking, encryption, and versioning | Two concurrent applies cannot both proceed; state objects are encrypted and versioned; the state backend is itself created by code | Must |
 | FR-4 | The system shall create a public DNS zone for the platform domain | Records created under the zone resolve publicly **[assumption: delegated subdomain, question 7]** | Must |
 
@@ -40,8 +41,8 @@ Each requirement states what the system shall do and how we will know it does it
 
 | ID | Requirement | Acceptance criteria | Priority |
 |---|---|---|---|
-| FR-10 | The system shall install from Git: an ingress controller, cert-manager, ExternalDNS, Prometheus and Grafana, Gatekeeper, a node autoscaler, and a secrets sync controller | Each add-on is an ArgoCD application with a pinned version; all report Healthy | Must |
-| FR-11 | The system shall give each tenant application an HTTPS address with a DNS record and a valid certificate, created automatically | Declaring an ingress for a hostname produces a resolving DNS record and a trusted certificate with no manual step | Must |
+| FR-10 | The system shall install from Git: the AWS Load Balancer Controller with Gateway API, cert-manager, ExternalDNS, the EBS storage (CSI) driver, Prometheus and Grafana, Gatekeeper, a node autoscaler, and a secrets sync controller | Each add-on is an ArgoCD application with a pinned version; all report Healthy. ingress-nginx is not used: the Kubernetes project retired it in March 2026 and it no longer receives security fixes | Must |
+| FR-11 | The system shall give each tenant application an HTTPS address with a DNS record and a valid certificate, created automatically | Declaring a Gateway API route for a hostname produces a resolving DNS record and a trusted certificate with no manual step | Must |
 | FR-12 | The system shall add and remove nodes in response to pending workloads | Scaling a workload beyond capacity adds a node; removing it lets the node scale down | Should |
 | FR-13 | The system shall isolate add-on failures | One add-on failing does not stop the others from syncing; the failure shows as Degraded in ArgoCD | Must |
 
@@ -49,8 +50,8 @@ Each requirement states what the system shall do and how we will know it does it
 
 | ID | Requirement | Acceptance criteria | Priority |
 |---|---|---|---|
-| FR-14 | The system shall let workloads access AWS through IAM roles bound to Kubernetes service accounts, with no keys | Add-ons that call AWS (ExternalDNS, cert-manager, autoscaler, secrets sync, load balancer controller) use role-bound service accounts; no AWS key exists in the cluster | Must |
-| FR-15 | The system shall let CI access AWS through GitHub's short-lived identity tokens; plan on pull request, apply on merge after approval | The plan is posted on the pull request; apply runs only from the main branch after approval; the CI role trusts only this repository's main branch for apply | Must |
+| FR-14 | The system shall let workloads access AWS through IAM roles bound to Kubernetes service accounts, with no keys | Add-ons that call AWS (ExternalDNS, cert-manager, autoscaler, secrets sync, load balancer controller) use role-bound service accounts; no AWS key exists in the cluster. The mechanism (IRSA or EKS Pod Identity) is decided by ADR in Phase 1 | Must |
+| FR-15 | The system shall let CI access AWS through GitHub's short-lived identity tokens; plan on pull request, apply on merge after approval, and a scheduled read-only plan for drift | Three separate roles: read-only plan (pull requests), apply (main branch only, after approval), and read-only drift check (scheduled run on main). The plan is posted on the pull request | Must |
 | FR-16 | The system shall deliver application secrets from AWS Secrets Manager into the cluster | A secret created in Secrets Manager appears as a Kubernetes secret in the right namespace; no secret value exists in Git **[assumption: External Secrets Operator]** | Must |
 
 ## E. Tenancy
@@ -58,14 +59,14 @@ Each requirement states what the system shall do and how we will know it does it
 | ID | Requirement | Acceptance criteria | Priority |
 |---|---|---|---|
 | FR-17 | The system shall onboard a tenant through one pull request that creates: namespace, resource quota, default limits, network policies, access roles, and an ArgoCD project | Merging one file or folder per tenant produces all six objects; no manual step **[assumption: namespace tenancy, question 5]** | Must |
-| FR-18 | The system shall isolate tenants from each other | A pod in tenant A cannot reach a pod in tenant B; tenant A's ArgoCD project cannot deploy into tenant B's namespace or create cluster-wide resources | Must |
+| FR-18 | The system shall isolate tenants from each other | A pod in tenant A cannot reach a pod in tenant B; tenant A's ArgoCD project cannot deploy into tenant B's namespace or create cluster-wide resources. Network policy enforcement is switched on in the VPC CNI (it is off by default), and locally the cluster uses a network plugin that enforces policies | Must |
 | FR-19 | The system shall offboard a tenant by removing its definition from Git | All the tenant's objects are removed; DNS records and certificates for its hostnames are cleaned up | Should |
 
 ## F. Policy
 
 | ID | Requirement | Acceptance criteria | Priority |
 |---|---|---|---|
-| FR-20 | The system shall reject, at admission, workloads that: run privileged, lack resource requests and limits, use images outside approved registries, or lack required labels | Each rule has a failing and a passing example; the failing ones are rejected with a message naming the rule | Must |
+| FR-20 | The system shall reject, at admission, workloads that: run privileged, lack resource requests and limits, use images outside approved registries, or lack required labels | Each rule has a failing and a passing example; the failing ones are rejected with a message naming the rule. Approved registries for tenant images: GitHub Container Registry under the repository owner's account **[assumption]**; platform add-ons may also use their upstream registries (registry.k8s.io, quay.io, public.ecr.aws) | Must |
 | FR-21 | The system shall test policies in CI before they are enforced, and support an audit-only mode for new rules | A pull request that breaks a policy test fails; a new rule can run in audit mode and report violations without blocking | Must |
 
 ## G. Observability and cost
@@ -74,15 +75,22 @@ Each requirement states what the system shall do and how we will know it does it
 |---|---|---|---|
 | FR-22 | The system shall provide a cluster dashboard and a per-tenant dashboard | Dashboards are provisioned from Git; per-tenant views filter by namespace | Must |
 | FR-23 | The system shall alert on: node not ready, add-on Degraded, ArgoCD sync failing, certificate expiring within 14 days, tenant near quota | Each alert fires in a test where its condition is forced | Must |
-| FR-24 | The system shall tag every AWS resource with environment, owner, and project, and alert when spend crosses budget thresholds | A check finds zero untagged resources; a budget alarm exists before the first cluster apply **[assumption: $12 and $25, question 2]** | Must |
+| FR-24 | The system shall tag every AWS resource with environment, owner, and project, and alert when spend crosses budget thresholds | A check finds zero untagged resources, including those created by controllers rather than Terraform (load balancers, EBS volumes, autoscaler nodes), because each controller is configured with the same default tags; a budget alarm exists before the first cluster apply **[assumption: $12 and $25, question 2]** | Must |
 
 ## H. Lifecycle and recovery
 
 | ID | Requirement | Acceptance criteria | Priority |
 |---|---|---|---|
 | FR-25 | The system shall detect drift in Terraform-managed infrastructure on a schedule | A scheduled plan reports any difference from code; a forced manual change is reported within 24 hours | Should |
-| FR-26 | The system shall tear down an environment completely with one documented command | After teardown, no billable resource remains except the state backend and DNS zone | Must |
-| FR-27 | The system shall rebuild a lost environment from Git with a documented, rehearsed procedure | The rebuild drill restores all add-ons and the tenant application; the time is recorded against the recovery target | Must |
+| FR-26 | The system shall tear down an environment completely with one documented command | After teardown, no billable resource remains except the state backend, DNS zone, and stored secrets | Must |
+| FR-27 | The system shall rebuild a lost environment from Git with a documented, rehearsed procedure | The rebuild drill restores all add-ons and the tenant application; the time is recorded against the recovery target. Drills use the Let's Encrypt staging issuer, since production allows only 5 identical certificates per week | Must |
+
+## I. Human access
+
+| ID | Requirement | Acceptance criteria | Priority |
+|---|---|---|---|
+| FR-28 | The system shall give platform engineers a break-glass path to the private cluster API | Access goes through AWS Systems Manager with no SSH keys and no public endpoint; every session is logged; access is time-limited | Must |
+| FR-29 | The system shall let each tenant see its own applications' sync status, health, logs, and dashboards | Tenant users see only their own ArgoCD project, namespace logs, and dashboards; they cannot see or change other tenants' | Should |
 
 ## Traceability from the original list
 
@@ -98,4 +106,4 @@ Each requirement states what the system shall do and how we will know it does it
 | FR-13 | FR-22, FR-23 |
 | FR-14 | FR-26, FR-27 |
 | FR-15 | FR-24 |
-| New | FR-4, FR-6, FR-7, FR-9, FR-13, FR-16, FR-18, FR-19 |
+| New | FR-4, FR-6, FR-7, FR-9, FR-13, FR-16, FR-18, FR-19, FR-28, FR-29 |

@@ -1,0 +1,19 @@
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sAllowedRepos
+metadata:
+  name: allowed-repos
+spec:
+  enforcementAction: deny
+  match:
+    kinds:
+      - { apiGroups: [""], kinds: [Pod] }
+      - { apiGroups: [apps], kinds: [Deployment, StatefulSet, DaemonSet, ReplicaSet] }
+      - { apiGroups: [batch], kinds: [Job, CronJob] }
+    # Tenant namespaces only (ADR-008).
+    namespaceSelector:
+      matchExpressions:
+        - { key: platform/tenant, operator: Exists }
+  parameters:
+    repos:
+      - ghcr.io/jawadceo/              # tenants' own images (flow F10)
+      - "ghcr.io/stefanprodan/podinfo:"  # demo workload, any fixed tag

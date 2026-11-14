@@ -1,0 +1,12 @@
+# Onboarding team-a is this one file (FR-17).
+name: team-a
+owner: team-a@example.com
+size: small
+groups: [team-a]
+apps:
+  - name: podinfo
+    path: apps/podinfo
+secrets:
+  localTestData:
+    - key: platform/local/team-a/podinfo
+      value: '{"greeting":"hello team-a (local test value)"}'

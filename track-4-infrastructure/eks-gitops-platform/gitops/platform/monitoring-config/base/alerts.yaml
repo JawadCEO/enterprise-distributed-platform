@@ -1,0 +1,67 @@
+# Platform alerts (FR-23). Each one is forced once in Phase 7 to prove it
+# fires (NFR-18); tests/alerts/README.md says how.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: platform
+  namespace: monitoring
+spec:
+  groups:
+    - name: platform.nodes
+      rules:
+        - alert: PlatformNodeNotReady
+          expr: kube_node_status_condition{condition="Ready", status="true"} == 0
+          for: 5m
+          labels: { severity: critical }
+          annotations:
+            summary: Node {{ $labels.node }} has not been Ready for 5 minutes
+
+    - name: platform.gitops
+      rules:
+        - alert: ArgoAppDegraded
+          expr: argocd_app_info{health_status="Degraded"} == 1
+          for: 5m
+          labels: { severity: warning }
+          annotations:
+            summary: Application {{ $labels.name }} is Degraded
+        - alert: ArgoAppOutOfSync
+          expr: argocd_app_info{sync_status="OutOfSync"} == 1
+          for: 15m
+          labels: { severity: warning }
+          annotations:
+            summary: Application {{ $labels.name }} has been OutOfSync for 15 minutes
+        - alert: ArgoSyncFailing
+          expr: increase(argocd_app_sync_total{phase=~"Error|Failed"}[10m]) > 0
+          labels: { severity: warning }
+          annotations:
+            summary: Sync of {{ $labels.name }} failed in the last 10 minutes
+
+    - name: platform.certificates
+      rules:
+        - alert: CertificateExpiringSoon
+          expr: (certmanager_certificate_expiration_timestamp_seconds - time()) < 14 * 24 * 3600
+          for: 1h
+          labels: { severity: warning }
+          annotations:
+            summary: Certificate {{ $labels.namespace }}/{{ $labels.name }} expires in under 14 days
+
+    - name: platform.tenants
+      rules:
+        - alert: TenantNearQuota
+          expr: |
+            kube_resourcequota{type="used"}
+              / ignoring(type) (kube_resourcequota{type="hard"} > 0)
+              > 0.9
+          for: 10m
+          labels: { severity: info }
+          annotations:
+            summary: Tenant {{ $labels.namespace }} uses over 90% of its {{ $labels.resource }} quota
+
+    - name: platform.admission
+      rules:
+        - alert: GatekeeperUnavailable
+          expr: kube_deployment_status_replicas_available{namespace="gatekeeper-system", deployment="gatekeeper-controller-manager"} < 1
+          for: 2m
+          labels: { severity: critical }
+          annotations:
+            summary: Gatekeeper is down; tenant deploys are blocked (ADR-008)
