@@ -52,7 +52,7 @@ The first start found the Service environment variable problem described above; 
 | 1 | Nothing; afterwards `rollout restart` of three services and `rollout undo` of state-processor, both completed | 820 accepted, 0 stuck, 0 wrong. **PASS** | 486,187,023 bytes acknowledged and counted. **PASS** | 1,688 delivered and received, 0 twice, 0 out of order. **PASS** |
 | 2 | `rollout restart` of event-ingest, state-processor and notifier about 57 s in (new ReplicaSets at 06:15:08 UTC, traffic 06:14 to 06:19) | 810 accepted, 768 completed, 37 rejected by the network, 5 timed out, 0 stuck, 0 wrong. **PASS** | 509,244,061 bytes acknowledged and counted. **PASS** | 845 delivered and received, 0 twice, 0 out of order, 0 bad signatures. **PASS** |
 
-In both runs the pending notifications (390 and 209) are all for customer-005, whose endpoint is down on purpose. Run 2 is NFR-22 on a real cluster: each restarted service had one replica, so every event went through a new pod starting and an old one draining.
+In both runs the pending notifications (390 and 209) are all for customer-005, whose endpoint is down on purpose. Run 2 is NFR-22 on a real cluster: each restarted service had one replica, so for each one the only pod was replaced while traffic flowed, the new one starting before the old one drained.
 
 ## Autoscaling
 
