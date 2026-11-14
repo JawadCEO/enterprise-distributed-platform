@@ -1,6 +1,6 @@
 # iot-telemetry-pipeline
 
-**Status:** building. The carrier code is complete: parts 2a (lines and network events), 2b (customer requests and provisioning) and 2c (webhooks and the outage guard) are built and run end to end; see the [2a run](results/carrier-2a-run-2026-11-10.md), the [2b run](results/carrier-2b-run-2026-11-11.md) and the [2c run](results/carrier-2c-run-2026-11-11.md). Part 3, failure drills, kills a broker, the database, Redis and each service mid-run with nothing lost; see the [drills](results/carrier-3-drills-2026-11-11.md). Part 4 adds one trace per event across every service, latency per hop and a Grafana dashboard; freshness p95 was 13.5 ms against 50 ms, see [observability](results/carrier-4-observability-2026-11-11.md). Part 5 held 4,986 events/s for 10 minutes with flat lag and nothing lost, lost a whole region with traffic moving to the other in under 1 s and nothing lost, and projects full scale at about 100 vCPU per region; freshness at that load missed 50 ms on 4 shared cores, see [scale and multi-region](results/carrier-5-scale-2026-11-11.md). Kubernetes and the write-up come next.
+**Status:** complete. The carrier code is complete: parts 2a (lines and network events), 2b (customer requests and provisioning) and 2c (webhooks and the outage guard) are built and run end to end; see the [2a run](results/carrier-2a-run-2026-11-10.md), the [2b run](results/carrier-2b-run-2026-11-11.md) and the [2c run](results/carrier-2c-run-2026-11-11.md). Part 3, failure drills, kills a broker, the database, Redis and each service mid-run with nothing lost; see the [drills](results/carrier-3-drills-2026-11-11.md). Part 4 adds one trace per event across every service, latency per hop and a Grafana dashboard; freshness p95 was 13.5 ms against 50 ms, see [observability](results/carrier-4-observability-2026-11-11.md). Part 5 held 4,986 events/s for 10 minutes with flat lag and nothing lost, lost a whole region with traffic moving to the other in under 1 s and nothing lost, and projects full scale at about 100 vCPU per region; freshness at that load missed 50 ms on 4 shared cores, see [scale and multi-region](results/carrier-5-scale-2026-11-11.md). Part 6 adds Kubernetes manifests with lag-based autoscaling; a rolling restart of three services during traffic on Docker Desktop's Kubernetes lost and duplicated nothing, see [Kubernetes](results/carrier-6-kubernetes-2026-11-13.md), the [runbook](operations/runbook.md) and the [cut-over from the legacy poller](operations/cut-over.md).
 
 Bulk jobs (FR-9), remote profile switch (FR-10) and the https-and-public-address rule for webhook URLs are built; see [features](results/carrier-features-2026-11-13.md).
 
@@ -17,7 +17,7 @@ A mobile carrier's IoT connectivity platform (like Verizon ThingSpace): millions
 | [Non-functional requirements and disaster recovery](requirements/non-functional-requirements.md) |
 | [Data and flow: what we receive, process, store, and return](requirements/data.md) |
 | [Architecture decisions](requirements/architecture-decisions.md) |
-| [Decisions still needed](requirements/open-questions.md) |
+| [Decisions: the questions open at the start and how each was settled](requirements/open-questions.md) |
 | [High-level design](architecture/high-level-design.md) |
 | [Runbook: deploy, roll back, scale, and what to do for each alert](operations/runbook.md) |
 | [Kubernetes manifests](../deploy/k8s/README.md) and the [part 6 results](results/carrier-6-kubernetes-2026-11-13.md) |
@@ -70,7 +70,7 @@ Today customers poll the carrier to learn whether their devices are online, whet
 
 | Phase | Focus for this project |
 |---|---|
-| 0 | Domain and how it works, requirements, ADRs 001 to 008, high-level design, and two PoCs (polling vs push, HTTP vs MQTT). Drafted; closes when the open questions are answered and the PoCs are run |
+| 0 | Domain and how it works, requirements, ADRs 001 to 008, high-level design, and two PoCs (polling vs push, HTTP vs MQTT). Done. The questions are decided; the two PoCs were not run separately (see question 8) |
 | 1 | Data layer: access patterns, PostgreSQL schema (registry, line and device state guarded by boot counter and sequence, daily-partitioned history and drop job, usage keyed by event, requests, notifications), Redis key design, key queries |
 | 2 | Kafka: topic layout (`network.events`, `line.commands`, `line.changes`), partition key and count for 3x peak, message format and schema registry, retry tiers, dead-letter and replay, cross-region topic replication design |
 | 3 | Services: API contracts (events, requests, webhooks), web stack and Java version, processor batch and commit strategy, request state machine and sweeper, notifier delivery, rate-limit algorithm, presence-monitor scan and outage guard, and the `network-simulator` with its fault scenarios |
@@ -78,12 +78,12 @@ Today customers poll the carrier to learn whether their devices are online, whet
 | 5 | Observability: one trace from gateway across Kafka to the database, freshness latency per hop against the 50ms budget, consumer lag, offline-detection lag, dead-letter rate, full-scale cost projection |
 | 6 | Testing and drills: integration tests, broker, database, Redis, and instance kills with reconciliation of every acknowledged event, laptop load benchmark with projection, two-region simulation (run on its own for memory) |
 | 7 | Kubernetes: manifests, lag-based autoscaling for the processor, rolling deploy and one-step rollback |
-| 8 | Write-up: final ADRs, runbook, results, multi-region design, and the documented cut-over from the legacy poller |
+| 8 | Write-up: final ADRs, runbook, results, multi-region design, and the documented [cut-over from the legacy poller](operations/cut-over.md) |
 
 ## Laptop fit (16GB)
 
 Roughly 7GB: one Kafka broker in KRaft mode (three for failure drills), PostgreSQL, Redis, six JVM services with capped heaps, and the simulator. Comfortable.
 
-## Open questions
+## Decisions
 
-See [open-questions.md](requirements/open-questions.md). The domain and end-to-end picture are agreed; the remaining questions confirm scope and sizing.
+See [decisions](requirements/open-questions.md). Every question open at the start is settled.

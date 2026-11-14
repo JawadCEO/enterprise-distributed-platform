@@ -6,7 +6,7 @@
 
 | ID | Area | Target | How it is measured | Verified on laptop |
 |---|---|---|---|---|
-| NFR-1 | Throughput | 50,000 events/sec at peak, 15,000 on average **[assumption, Q5]**. Laptop pass target: 5,000 events/sec | Sustained for 10 minutes with consumer lag not growing | Laptop target: yes. Full scale: projected |
+| NFR-1 | Throughput | 50,000 events/sec at peak, 15,000 on average **[decided, Q5]**. Laptop pass target: 5,000 events/sec | Sustained for 10 minutes with consumer lag not growing | Laptop target: yes. Full scale: projected |
 | NFR-2 | Freshness latency | p95 < 50ms, p99 < 150ms | From the gateway receiving an event to the line's new state being readable, measured with trace timestamps at each hop | Yes, at laptop load |
 | NFR-2a | Notification latency | p95 < 2s from the event to the webhook leaving the platform | Notifier send time minus gateway receive time, to a healthy test endpoint | Yes |
 | NFR-2b | Request completion | p95 < 5s from `202` to `COMPLETED` when the simulated network answers in 1s | Request timestamps | Yes |
@@ -14,7 +14,7 @@
 | NFR-4 | Read latency | p99 < 20ms for a line's current state, < 200ms for one page of history | `customer-api` request duration | Yes |
 | NFR-5 | Availability | 99.99% for ingestion and status reads | Successful requests over valid requests, per 30 days. This allows about 4.3 minutes of downtime a month. | Designed; single-region failure drills only |
 | NFR-6 | Durability | RPO = 0: no acknowledged event or accepted request is lost | Drill: the simulator records every acknowledged event, and the stored results are reconciled against it after each failure | Yes, within one region |
-| NFR-7 | Recovery | RTO < 30s for a node, < 60s for a region | From failure until processing resumes at full rate | Node: yes. Region: simulated in Phase 6 **[assumption, Q6]** |
+| NFR-7 | Recovery | RTO < 30s for a node, < 60s for a region | From failure until processing resumes at full rate | Node: yes. Region: simulated in Phase 6 **[decided, Q6]** |
 | NFR-8 | Offline detection | Within the keep-alive window plus 30s | Time from a device's last event to its offline state change | Yes |
 | NFR-8a | Usage accuracy | Every line's cycle total equals the simulator's ledger exactly, after every drill | Reconciliation job | Yes |
 
@@ -58,7 +58,7 @@ The consumer's batching delay is the main lever: larger batches raise throughput
 | NFR-15 | Authentication | Every event comes from an authenticated device or network source; every request from an authenticated customer. Methods are decided in Phase 4. |
 | NFR-16 | Transport | TLS from device to gateway, and TLS between services in the Kubernetes deployment |
 | NFR-17 | Secrets | Device credentials are stored only as hashes. Service secrets live in Kubernetes secrets, never in the repository. |
-| NFR-18 | Customer isolation | No API path or webhook exposes another customer's lines **[assumption, Q1]** |
+| NFR-18 | Customer isolation | No API path or webhook exposes another customer's lines **[decided, Q1]** |
 | NFR-18a | Webhook signing | Every webhook is signed (HMAC with a per-customer secret) so customers can verify it |
 | NFR-19 | Audit | Line requests, registry changes and dead-letter replays are logged with who did it and when |
 
