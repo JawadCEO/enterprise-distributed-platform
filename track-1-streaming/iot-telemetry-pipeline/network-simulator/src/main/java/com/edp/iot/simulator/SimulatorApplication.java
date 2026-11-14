@@ -53,6 +53,10 @@ public class SimulatorApplication implements CommandLineRunner, ExitCodeGenerato
             registrar.registerFleet(); // the two-region simulation imports the same fleet into each region
             return;
         }
+        if (props.mode().equals("bench")) {
+            new IngestBench(props, http, registrar.networkKey()).run();
+            return;
+        }
         if (props.mode().equals("reconcile")) {
             reconcileFromLedger(http, registrar);
             return;
@@ -77,7 +81,14 @@ public class SimulatorApplication implements CommandLineRunner, ExitCodeGenerato
         }
         RequestDriver requests = new RequestDriver(props, http, registrar, engine.lines(), props.seed() + 1);
         requests.start();
+        PollProbe poll = props.pollSeconds() > 0 ? new PollProbe(props, http, registrar) : null;
+        if (poll != null) {
+            poll.start(engine.lines());
+        }
         engine.run();
+        if (poll != null) {
+            poll.stop();
+        }
         java.time.Instant trafficEnd = java.time.Instant.now();
         log.info("Ledger of acknowledged events: {}", props.ledgerFile());
         RequestDriver.Report q = requests.finish();
@@ -108,6 +119,16 @@ public class SimulatorApplication implements CommandLineRunner, ExitCodeGenerato
         }
         NotificationCheck.Report n = new NotificationCheck(props, http, registrar, receiver)
                 .run(runStart, trafficEnd, engine.lines(), before, requests.tracked(), engine.outageWindow(), engine.outageLines());
+        if (poll != null) {
+            String[] behaviours = props.webhookBehaviours().split(",");
+            StringBuilder ok = new StringBuilder();
+            for (int c = 0; c < props.customers(); c++) {
+                if (behaviours[c % behaviours.length].trim().equals("ok")) {
+                    ok.append(Registrar.customerId(c)).append(' ');
+                }
+            }
+            poll.report(receiver.accepted(), ok.toString());
+        }
         receiver.stop();
         log.info("Notification reconciliation: {} notifications ({} delivered, {} parked, {} pending), {} received "
                         + "({} more than once), {} refused by failing endpoints; {} delivered but not received, {} received but "

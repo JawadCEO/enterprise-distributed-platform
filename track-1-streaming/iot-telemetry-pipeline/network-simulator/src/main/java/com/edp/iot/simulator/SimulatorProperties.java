@@ -82,5 +82,15 @@ public record SimulatorProperties(
         @DefaultValue("150s") Duration outageStart,
         @DefaultValue("90s") Duration outageLength,
         /* How long to wait at the end for notifications to be delivered. */
-        @DefaultValue("120s") Duration notificationWait) {
+        @DefaultValue("120s") Duration notificationWait,
+        /* Polling vs push test: also poll every line's state once per this many seconds; 0 is off. */
+        @DefaultValue("0") int pollSeconds,
+        /* HTTP vs MQTT test (bench mode): http, http-batch or mqtt, the total event rate, and a share of
+           devices that drop at once at benchDisconnectAt (0 is never) and return benchReconnectAfter later. */
+        @DefaultValue("http-batch") String benchProtocol,
+        @DefaultValue("1000") int benchRate,
+        @DefaultValue("0s") Duration benchDisconnectAt,
+        @DefaultValue("0.1") double benchDisconnectShare,
+        @DefaultValue("5s") Duration benchReconnectAfter,
+        @DefaultValue("tcp://localhost:1883") String mqttUrl) {
 }

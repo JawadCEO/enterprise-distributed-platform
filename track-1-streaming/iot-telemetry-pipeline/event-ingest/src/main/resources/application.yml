@@ -50,6 +50,9 @@ iot:
     replication-factor: ${KAFKA_REPLICATION:1}
     min-insync-replicas: ${KAFKA_MIN_ISR:1}
     line-rate-limit-per-sec: ${LINE_RATE_LIMIT:10}
+    mqtt:
+      enabled: ${MQTT_ENABLED:false}
+      broker-url: ${MQTT_URL:tcp://localhost:1883}
 
 management:
   endpoints:

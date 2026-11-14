@@ -4,6 +4,8 @@
 
 Bulk jobs (FR-9), remote profile switch (FR-10) and the https-and-public-address rule for webhook URLs are built; see [features](results/carrier-features-2026-11-13.md).
 
+The two Phase 0 PoCs ran on the finished platform: push notices a device change in 20 ms where polling every 30 s took 11.7 s, and batched HTTP and MQTT both carried 2,000 events/s with nothing lost when 10% of devices dropped at once; see [PoC results](results/carrier-phase0-pocs-2026-11-14.md).
+
 A mobile carrier's IoT connectivity platform (like Verizon ThingSpace): millions of SIM-connected trackers, meters and sensors for business customers. Start with [how it works](requirements/how-it-works.md).
 
 ## Documents
@@ -70,7 +72,7 @@ Today customers poll the carrier to learn whether their devices are online, whet
 
 | Phase | Focus for this project |
 |---|---|
-| 0 | Domain and how it works, requirements, ADRs 001 to 008, high-level design, and two PoCs (polling vs push, HTTP vs MQTT). Done. The questions are decided; the two PoCs were not run separately (see question 8) |
+| 0 | Domain and how it works, requirements, ADRs 001 to 008, high-level design, and two PoCs (polling vs push, HTTP vs MQTT). Done. The questions are decided, and both PoCs ran, see [PoC results](results/carrier-phase0-pocs-2026-11-14.md) |
 | 1 | Data layer: access patterns, PostgreSQL schema (registry, line and device state guarded by boot counter and sequence, daily-partitioned history and drop job, usage keyed by event, requests, notifications), Redis key design, key queries |
 | 2 | Kafka: topic layout (`network.events`, `line.commands`, `line.changes`), partition key and count for 3x peak, message format and schema registry, retry tiers, dead-letter and replay, cross-region topic replication design |
 | 3 | Services: API contracts (events, requests, webhooks), web stack and Java version, processor batch and commit strategy, request state machine and sweeper, notifier delivery, rate-limit algorithm, presence-monitor scan and outage guard, and the `network-simulator` with its fault scenarios |

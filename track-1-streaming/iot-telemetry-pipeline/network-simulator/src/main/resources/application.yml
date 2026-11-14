@@ -28,3 +28,10 @@ iot:
     outage-region: ${OUTAGE_REGION:south}
     outage-start: ${OUTAGE_START:150s}
     outage-length: ${OUTAGE_LENGTH:90s}
+    poll-seconds: ${POLL_SECONDS:0}
+    bench-protocol: ${BENCH_PROTOCOL:http-batch}
+    bench-rate: ${BENCH_RATE:1000}
+    bench-disconnect-at: ${BENCH_DISCONNECT_AT:0s}
+    bench-disconnect-share: ${BENCH_DISCONNECT_SHARE:0.1}
+    bench-reconnect-after: ${BENCH_RECONNECT_AFTER:5s}
+    mqtt-url: ${MQTT_URL:tcp://localhost:1883}
