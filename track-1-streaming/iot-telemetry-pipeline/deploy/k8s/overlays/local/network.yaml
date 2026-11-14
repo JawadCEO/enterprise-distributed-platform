@@ -11,6 +11,9 @@ spec:
     metadata:
       labels: { app.kubernetes.io/name: network }
     spec:
+      # Kubernetes would set REDIS_PORT, KAFKA_PORT and the like to tcp://host:port for
+      # every Service, which overrides the settings of the same name and breaks startup
+      enableServiceLinks: false
       containers:
         - name: network
           image: iot/network-simulator:local
