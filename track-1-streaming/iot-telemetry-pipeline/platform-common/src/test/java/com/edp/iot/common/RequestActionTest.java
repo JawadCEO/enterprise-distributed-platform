@@ -24,9 +24,21 @@ class RequestActionTest {
 
     @Test
     void targetsAndPathNames() {
-        assertThat(RequestAction.RESTORE.target()).isEqualTo(LineState.ACTIVE);
-        assertThat(RequestAction.DEACTIVATE.target()).isEqualTo(LineState.DEACTIVATED);
+        assertThat(RequestAction.RESTORE.target(LineState.SUSPENDED)).isEqualTo(LineState.ACTIVE);
+        assertThat(RequestAction.DEACTIVATE.target(LineState.ACTIVE)).isEqualTo(LineState.DEACTIVATED);
         assertThat(RequestAction.fromPath("restore")).contains(RequestAction.RESTORE);
         assertThat(RequestAction.fromPath("reboot")).isEmpty();
+        assertThat(RequestAction.fromPath("profile")).contains(RequestAction.SWITCH_PROFILE);
+    }
+
+    @Test
+    void aProfileSwitchKeepsTheLineStateAndNeedsAProgrammableSim() {
+        assertThat(RequestAction.SWITCH_PROFILE.allowedFrom(LineState.ACTIVE)).isTrue();
+        assertThat(RequestAction.SWITCH_PROFILE.allowedFrom(LineState.INVENTORY)).isTrue();
+        assertThat(RequestAction.SWITCH_PROFILE.allowedFrom(LineState.SUSPENDED)).isFalse();
+        assertThat(RequestAction.SWITCH_PROFILE.target(LineState.INVENTORY)).isEqualTo(LineState.INVENTORY);
+        assertThat(RequestAction.SWITCH_PROFILE.target(LineState.ACTIVE)).isEqualTo(LineState.ACTIVE);
+        assertThat(RequestAction.SWITCH_PROFILE.needsProgrammableSim()).isTrue();
+        assertThat(RequestAction.SUSPEND.needsProgrammableSim()).isFalse();
     }
 }

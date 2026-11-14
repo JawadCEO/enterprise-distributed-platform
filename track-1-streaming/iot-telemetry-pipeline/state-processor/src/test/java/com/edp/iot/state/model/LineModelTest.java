@@ -103,6 +103,20 @@ class LineModelTest {
     }
 
     @Test
+    void aDeviceReconnectingDuringAProfileSwitchSendsNoAlert() {
+        // FR-20, Flow E step 3: the line is PENDING while the switch runs, and the device drops off and comes back
+        LineInfo line = line(SimType.EMBEDDED, false);
+        DeviceState s = online(IMEI_A, new OrderingKey(1, 1));
+        var r = LineModel.apply(new LineModel.Snapshot(line, LineState.PENDING, s, Map.of()),
+                List.of(network(EventType.DEVICE_DETACHED, IMEI_A, T0.plusSeconds(60), Map.of()),
+                        network(EventType.DEVICE_ATTACHED, IMEI_A, T0.plusSeconds(61), Map.of())), Set.of());
+
+        assertThat(kinds(r)).contains(ChangeKind.OFFLINE, ChangeKind.ONLINE);
+        assertThat(r.changes()).noneMatch(LineChange::notifyCustomer);
+        assertThat(r.state().connection()).isEqualTo(com.edp.iot.common.line.Connection.ONLINE);
+    }
+
+    @Test
     void usageCountsOnlyNewRecordsAndCrossesEachThresholdOnce() {
         LineInfo line = line(SimType.REMOVABLE, false);
         NetworkEvent first = network(EventType.USAGE_RECORD, IMEI_A, T0, Map.of("bytesUp", 400_000, "bytesDown", 450_000));

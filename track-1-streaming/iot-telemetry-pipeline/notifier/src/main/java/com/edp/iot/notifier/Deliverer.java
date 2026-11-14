@@ -2,6 +2,7 @@ package com.edp.iot.notifier;
 
 import com.edp.iot.common.Json;
 import com.edp.iot.common.notify.WebhookSignature;
+import com.edp.iot.common.notify.WebhookUrlPolicy;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
@@ -80,6 +81,7 @@ class Deliverer {
 
     private final JdbcTemplate jdbc;
     private final HttpClient http;
+    private final WebhookUrlPolicy urlPolicy;
     private final WebhookDirectory webhooks;
     private final NotifierProperties props;
     private final Backoff backoff;
@@ -109,6 +111,7 @@ class Deliverer {
               MeterRegistry meters) {
         this.jdbc = jdbc;
         this.http = webhookHttpClient;
+        this.urlPolicy = new WebhookUrlPolicy(props.allowInsecureUrls());
         this.webhooks = webhooks;
         this.props = props;
         this.backoff = new Backoff(props.retryInitial(), props.retryMax());
@@ -195,6 +198,12 @@ class Deliverer {
     }
 
     private void send(WebhookDirectory.Endpoint endpoint, Claimed c, AtomicInteger flying) {
+        // Checked again on every call: a host that resolved to public addresses at registration may not now.
+        var refusal = urlPolicy.check(endpoint.url());
+        if (refusal.isPresent()) {
+            finished(endpoint, c, flying, false, refusal.get().code());
+            return;
+        }
         long timestamp = Instant.now().getEpochSecond();
         HttpRequest request;
         try {

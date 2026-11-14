@@ -14,7 +14,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import java.time.Duration;
 
 @Configuration
-@EnableConfigurationProperties(RequestProperties.class)
+@EnableConfigurationProperties({RequestProperties.class, JobProperties.class})
 class RequestConfig {
 
     @Bean

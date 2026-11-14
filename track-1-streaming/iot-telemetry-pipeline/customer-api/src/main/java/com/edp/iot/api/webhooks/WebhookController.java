@@ -5,6 +5,8 @@ import com.edp.iot.api.Cursor;
 import com.edp.iot.common.Json;
 import com.edp.iot.common.notify.NotificationType;
 import com.edp.iot.common.notify.WebhookSignature;
+import com.edp.iot.common.notify.WebhookUrlPolicy;
+import org.springframework.beans.factory.annotation.Value;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -44,9 +46,12 @@ class WebhookController {
     static final int MAX_WEBHOOKS = 10;
 
     private final JdbcTemplate jdbc;
+    private final WebhookUrlPolicy urlPolicy;
 
-    WebhookController(JdbcTemplate jdbc) {
+    WebhookController(JdbcTemplate jdbc,
+                      @Value("${iot.webhooks.allow-insecure-urls:false}") boolean allowInsecureUrls) {
         this.jdbc = jdbc;
+        this.urlPolicy = new WebhookUrlPolicy(allowInsecureUrls);
     }
 
     record WebhookRequest(String url, List<String> types, Boolean active) {
@@ -268,22 +273,15 @@ class WebhookController {
     }
 
     /**
-     * An absolute http or https URL. Outside this local stack the platform would also require https
-     * and refuse private addresses, so an endpoint can't point the notifier at internal services.
+     * An absolute https URL whose host resolves only to public addresses (WebhookUrlPolicy), so an
+     * endpoint can't point the notifier at internal services. The local stack also allows plain http
+     * to private addresses, for the simulated customers.
      */
-    static String validUrl(String url) {
-        if (url == null || url.length() > 2048) {
-            throw new Invalid("INVALID_URL", "url is required, at most 2048 characters");
-        }
-        try {
-            URI uri = URI.create(url);
-            if (!("http".equals(uri.getScheme()) || "https".equals(uri.getScheme())) || uri.getHost() == null) {
-                throw new IllegalArgumentException();
-            }
-            return uri.toString();
-        } catch (IllegalArgumentException e) {
-            throw new Invalid("INVALID_URL", "url must be an absolute http or https URL");
-        }
+    String validUrl(String url) {
+        urlPolicy.check(url).ifPresent(r -> {
+            throw new Invalid(r.code(), r.message());
+        });
+        return URI.create(url).toString();
     }
 
     static String[] validTypes(List<String> types) {

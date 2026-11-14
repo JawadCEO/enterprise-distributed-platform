@@ -158,7 +158,7 @@ final class Registrar {
             Map<String, Object> body = new LinkedHashMap<>();
             body.put("url", baseUrl + "/hooks/" + customerId);
             body.put("types", List.of("REQUEST_COMPLETED", "REQUEST_FAILED", "DEVICE_ONLINE", "DEVICE_OFFLINE", "USAGE_80",
-                    "USAGE_100", "SIM_MOVED", "LINE_STATE_CHANGED", "OUTAGE_STARTED", "OUTAGE_ENDED"));
+                    "USAGE_100", "SIM_MOVED", "LINE_STATE_CHANGED", "OUTAGE_STARTED", "OUTAGE_ENDED", "BULK_JOB_SUMMARY"));
             HttpResponse<String> created = send("POST", "/v1/webhooks", customerId, Jsons.write(body));
             if (created.statusCode() != 201) {
                 throw new IllegalStateException("Webhook registration failed: " + created.statusCode() + " " + created.body());

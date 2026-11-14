@@ -2,6 +2,8 @@
 
 **Status:** building. The carrier code is complete: parts 2a (lines and network events), 2b (customer requests and provisioning) and 2c (webhooks and the outage guard) are built and run end to end; see the [2a run](results/carrier-2a-run-2026-11-10.md), the [2b run](results/carrier-2b-run-2026-11-11.md) and the [2c run](results/carrier-2c-run-2026-11-11.md). Part 3, failure drills, kills a broker, the database, Redis and each service mid-run with nothing lost; see the [drills](results/carrier-3-drills-2026-11-11.md). Part 4 adds one trace per event across every service, latency per hop and a Grafana dashboard; freshness p95 was 13.5 ms against 50 ms, see [observability](results/carrier-4-observability-2026-11-11.md). Part 5 held 4,986 events/s for 10 minutes with flat lag and nothing lost, lost a whole region with traffic moving to the other in under 1 s and nothing lost, and projects full scale at about 100 vCPU per region; freshness at that load missed 50 ms on 4 shared cores, see [scale and multi-region](results/carrier-5-scale-2026-11-11.md). Kubernetes and the write-up come next.
 
+Bulk jobs (FR-9), remote profile switch (FR-10) and the https-and-public-address rule for webhook URLs are built; see [features](results/carrier-features-2026-11-13.md).
+
 A mobile carrier's IoT connectivity platform (like Verizon ThingSpace): millions of SIM-connected trackers, meters and sensors for business customers. Start with [how it works](requirements/how-it-works.md).
 
 ## Documents
