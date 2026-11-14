@@ -2,6 +2,17 @@
 # fail closed, but platform namespaces carry the
 # admission.gatekeeper.sh/ignore label and are skipped by the webhook,
 # so the platform can repair itself while Gatekeeper is down.
+#
+# The webhook only sees namespaced workload kinds. Without this, cluster-scoped
+# objects (ClusterRoles, CRDs) also hit the fail-closed webhook, and no
+# namespace label can exempt them: the first local run had kube-prometheus-stack
+# blocked while Gatekeeper was still starting.
+validatingWebhookCustomRules:
+  - apiGroups: ["", "apps", "batch"]
+    apiVersions: ["*"]
+    operations: [CREATE, UPDATE]
+    resources: [pods, deployments, statefulsets, daemonsets, replicasets, jobs, cronjobs]
+    scope: Namespaced
 replicas: 2
 validatingWebhookFailurePolicy: Fail
 validatingWebhookTimeoutSeconds: 3

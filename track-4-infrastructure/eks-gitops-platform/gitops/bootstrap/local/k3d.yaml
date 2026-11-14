@@ -7,6 +7,12 @@ metadata:
 servers: 1
 agents: 1
 image: rancher/k3s:v1.31.4-k3s1
+# Pin the API to localhost. Otherwise k3d on Windows writes host.docker.internal
+# into the kubeconfig, which can resolve to an unreachable LAN address.
+kubeAPI:
+  host: 127.0.0.1
+  hostIP: 127.0.0.1
+  hostPort: "6550"
 ports:
   # Envoy Gateway's LoadBalancer service is exposed through k3d's load balancer.
   - port: 8443:443

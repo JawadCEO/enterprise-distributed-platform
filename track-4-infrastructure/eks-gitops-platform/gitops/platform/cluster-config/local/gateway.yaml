@@ -30,7 +30,9 @@ spec:
       tls:
         mode: Terminate
         certificateRefs:
-          - name: shared-gateway-tls
+          - group: ""
+            kind: Secret
+            name: shared-gateway-tls
       allowedRoutes:
         namespaces:
           from: Selector
@@ -46,9 +48,14 @@ metadata:
   namespace: envoy-gateway-system
 spec:
   parentRefs:
-    - name: shared
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: shared
       sectionName: http
   rules:
-    - filters:
+    # Explicit defaults, so ArgoCD sees no difference from the live object.
+    - matches:
+        - path: { type: PathPrefix, value: / }
+      filters:
         - type: RequestRedirect
           requestRedirect: { scheme: https, statusCode: 301 }

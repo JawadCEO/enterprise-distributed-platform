@@ -7,10 +7,14 @@ metadata:
     owner: tenant
 spec:
   parentRefs:
-    - name: shared
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: shared
       namespace: envoy-gateway-system
       sectionName: https
   hostnames: ["replaced-by-tenant-chart"]
   rules:
-    - backendRefs:
-        - { name: podinfo, port: 80 }
+    - matches:
+        - path: { type: PathPrefix, value: / }
+      backendRefs:
+        - { group: "", kind: Service, name: podinfo, port: 80, weight: 1 }
