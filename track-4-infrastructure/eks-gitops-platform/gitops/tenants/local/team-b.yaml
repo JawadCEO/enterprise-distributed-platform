@@ -1,0 +1,12 @@
+# Second tenant, used as the "noisy neighbour" in the isolation tests.
+name: team-b
+owner: team-b@example.com
+size: small
+groups: [team-b]
+apps:
+  - name: podinfo
+    path: apps/podinfo
+secrets:
+  localTestData:
+    - key: platform/local/team-b/podinfo
+      value: '{"greeting":"hello team-b (local test value)"}'

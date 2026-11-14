@@ -1,0 +1,40 @@
+{{- range .Values.apps }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: {{ $.Values.name }}-{{ .name }}
+  namespace: argocd
+  labels:
+    {{- include "tenant.labels" $ | nindent 4 }}
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: {{ $.Values.name }}
+  source:
+    repoURL: {{ .repoURL | default $.Values.repoURL }}
+    targetRevision: {{ .targetRevision | default $.Values.targetRevision }}
+    path: {{ if .repoURL }}{{ .path }}{{ else }}{{ $.Values.basePath }}/{{ .path }}{{ end }}
+    kustomize:
+      namespace: {{ $.Values.name }}
+      patches:
+        # Every app gets <app>-<tenant>.<appsDomain> on the shared Gateway (FR-11).
+        - target: { kind: HTTPRoute }
+          patch: |-
+            - op: replace
+              path: /spec/hostnames
+              value: ["{{ .name }}-{{ $.Values.name }}.{{ $.Values.appsDomain }}"]
+        # Secrets are read from platform/<cluster>/<tenant>/<app> (FR-16).
+        - target: { kind: ExternalSecret }
+          patch: |-
+            - op: replace
+              path: /spec/dataFrom/0/extract/key
+              value: "platform/{{ $.Values.cluster }}/{{ $.Values.name }}/{{ .name }}"
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: {{ $.Values.name }}
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+{{- end }}

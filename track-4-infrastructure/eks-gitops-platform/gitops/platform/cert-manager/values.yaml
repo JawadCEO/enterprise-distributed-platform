@@ -1,0 +1,10 @@
+crds:
+  enabled: true
+resources:
+  requests: { cpu: 10m, memory: 64Mi }
+  limits: { memory: 256Mi }
+# Lets cert-manager read Gateway listeners and issue their certificates.
+config:
+  apiVersion: controller.config.cert-manager.io/v1alpha1
+  kind: ControllerConfiguration
+  enableGatewayAPI: true

@@ -1,0 +1,74 @@
+# Same shared Gateway as on the laptop (ADR-005). On EKS, Envoy's service is
+# exposed by an internet-facing NLB created by the AWS Load Balancer Controller.
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: EnvoyProxy
+metadata:
+  name: nlb
+  namespace: envoy-gateway-system
+spec:
+  provider:
+    type: Kubernetes
+    kubernetes:
+      envoyService:
+        annotations:
+          service.beta.kubernetes.io/aws-load-balancer-type: external
+          service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip
+          service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: envoy
+spec:
+  controllerName: gateway.envoyproxy.io/gatewayclass-controller
+  parametersRef:
+    group: gateway.envoyproxy.io
+    kind: EnvoyProxy
+    name: nlb
+    namespace: envoy-gateway-system
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: shared
+  namespace: envoy-gateway-system
+  annotations:
+    # Own CA until a domain exists; then letsencrypt-staging, and letsencrypt
+    # for the final measured run only (ADR-013, FR-27).
+    cert-manager.io/cluster-issuer: platform
+spec:
+  gatewayClassName: envoy
+  listeners:
+    - name: http
+      port: 80
+      protocol: HTTP
+      allowedRoutes:
+        namespaces: { from: Same }
+    - name: https
+      port: 443
+      protocol: HTTPS
+      hostname: "*.apps.eks-gitops.internal"  # no domain yet (ADR-013)
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - name: shared-gateway-tls
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchExpressions:
+              - { key: platform/tenant, operator: Exists }
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: https-redirect
+  namespace: envoy-gateway-system
+spec:
+  parentRefs:
+    - name: shared
+      sectionName: http
+  rules:
+    - filters:
+        - type: RequestRedirect
+          requestRedirect: { scheme: https, statusCode: 301 }

@@ -1,0 +1,89 @@
+# eks-gitops-platform: checks on every pull request (FR-11, FR-21, NFR-7, NFR-13).
+# No AWS access needed.
+name: eks-gitops checks
+
+on:
+  pull_request:
+    paths:
+      - track-4-infrastructure/eks-gitops-platform/**
+      - .github/workflows/eks-gitops-*.yml
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: track-4-infrastructure/eks-gitops-platform
+
+jobs:
+  policies:
+    name: Policy tests (gator)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install gator
+        run: |
+          curl -fsSL https://github.com/open-policy-agent/gatekeeper/releases/download/v3.18.0/gator-v3.18.0-linux-amd64.tar.gz \
+            | tar -xz -C /usr/local/bin gator
+      - run: gator verify tests/policies/
+
+  charts:
+    name: Render charts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with: { version: v3.16.4 }
+      - name: Lint and render the root chart for every cluster
+        run: |
+          for c in local dev prod; do
+            helm lint gitops/root -f gitops/root/values-$c.yaml
+            helm template root gitops/root -f gitops/root/values-$c.yaml > /dev/null
+          done
+      - name: Lint and render every tenant file
+        run: |
+          for f in gitops/tenants/*/*.yaml; do
+            cluster=$(basename "$(dirname "$f")")
+            helm template t gitops/charts/tenant -f "$f" \
+              --set cluster=$cluster,appsDomain=example.test,repoURL=https://example.test/repo.git,basePath=x,awsAccountId=000000000000 > /dev/null
+          done
+      - name: Every tenant app passes the policies
+        run: |
+          curl -fsSL https://github.com/open-policy-agent/gatekeeper/releases/download/v3.18.0/gator-v3.18.0-linux-amd64.tar.gz \
+            | tar -xz -C /usr/local/bin gator
+          for app in gitops/apps/*/; do
+            kubectl kustomize "$app" > /tmp/app.yaml
+            gator test -f gitops/policies/templates -f gitops/policies/constraints \
+              -f tests/policies/samples/tenant-namespace.yaml -f /tmp/app.yaml
+          done
+
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  terraform:
+    name: Terraform format, validate, security
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with: { terraform_version: 1.10.5 }
+      - run: terraform fmt -check -recursive terraform
+      - name: Validate every stack
+        run: |
+          for d in terraform/account terraform/envs/dev terraform/envs/prod; do
+            terraform -chdir=$d init -backend=false -input=false
+            terraform -chdir=$d validate
+          done
+      - uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: track-4-infrastructure/eks-gitops-platform/terraform
+          framework: terraform
+          quiet: true
+          soft_fail: true   # report only until the first findings are triaged

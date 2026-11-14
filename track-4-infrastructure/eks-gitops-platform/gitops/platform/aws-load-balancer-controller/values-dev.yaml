@@ -1,0 +1,9 @@
+clusterName: eks-gitops-dev
+region: us-east-1
+# Finds the VPC by its Name tag (set by Terraform), so no ID is copied by hand.
+vpcTags:
+  Name: eks-gitops-dev
+defaultTags:
+  environment: dev
+  project: eks-gitops-platform
+  owner: platform-team

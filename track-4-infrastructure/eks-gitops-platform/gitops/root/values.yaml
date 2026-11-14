@@ -1,0 +1,122 @@
+# Catalog of add-ons shared by every cluster.
+# Versions are NOT set here: each values-<cluster>.yaml pins its own, so
+# promotion from dev to prod is a version change in values-prod.yaml (FR-9).
+
+cluster: ""          # set by values-<cluster>.yaml
+appsDomain: ""       # tenant hostnames are <app>-<tenant>.<appsDomain>
+awsAccountId: ""     # AWS clusters only
+repoURL: https://github.com/JawadCEO/enterprise-distributed-platform.git
+targetRevision: main
+basePath: track-4-infrastructure/eks-gitops-platform/gitops
+
+# Platform namespaces are exempt from Gatekeeper's webhook (ADR-008),
+# so the platform can repair itself while Gatekeeper is down.
+platformNamespaceLabels: &platformNs
+  admission.gatekeeper.sh/ignore: platform
+
+addons:
+  argocd:
+    enabled: true
+    wave: "-4"
+    namespace: argocd
+    chart: { repo: https://argoproj.github.io/argo-helm, name: argo-cd }
+
+  envoy-gateway:
+    enabled: true
+    wave: "-3"
+    namespace: envoy-gateway-system
+    managedNamespaceLabels: *platformNs
+    chart: { repo: docker.io/envoyproxy, name: gateway-helm }
+
+  cert-manager:
+    enabled: true
+    wave: "-2"
+    namespace: cert-manager
+    managedNamespaceLabels: *platformNs
+    chart: { repo: https://charts.jetstack.io, name: cert-manager }
+
+  external-secrets:
+    enabled: true
+    wave: "-2"
+    namespace: external-secrets
+    managedNamespaceLabels: *platformNs
+    chart: { repo: https://charts.external-secrets.io, name: external-secrets }
+
+  aws-load-balancer-controller:
+    enabled: false
+    wave: "-2"
+    namespace: kube-system
+    chart: { repo: https://aws.github.io/eks-charts, name: aws-load-balancer-controller }
+
+  karpenter:
+    enabled: false
+    wave: "-2"
+    namespace: karpenter
+    managedNamespaceLabels: *platformNs
+    chart: { repo: public.ecr.aws/karpenter, name: karpenter }
+
+  external-dns:
+    enabled: false
+    wave: "-1"
+    namespace: external-dns
+    managedNamespaceLabels: *platformNs
+    chart: { repo: https://kubernetes-sigs.github.io/external-dns/, name: external-dns }
+
+  kube-prometheus-stack:
+    enabled: true
+    wave: "-1"
+    namespace: monitoring
+    managedNamespaceLabels: *platformNs
+    chart: { repo: https://prometheus-community.github.io/helm-charts, name: kube-prometheus-stack }
+
+  loki:
+    enabled: true
+    wave: "-1"
+    namespace: monitoring
+    managedNamespaceLabels: *platformNs
+    chart: { repo: https://grafana.github.io/helm-charts, name: loki }
+
+  alloy:
+    enabled: true
+    wave: "0"
+    namespace: monitoring
+    chart: { repo: https://grafana.github.io/helm-charts, name: alloy }
+
+  # Platform alerts, dashboards and scrape targets (FR-22, FR-23).
+  monitoring-config:
+    enabled: true
+    wave: "0"
+    namespace: monitoring
+    skipDryRun: true
+    path: platform/monitoring-config/base
+
+  gatekeeper:
+    enabled: true
+    wave: "-1"
+    namespace: gatekeeper-system
+    chart: { repo: https://open-policy-agent.github.io/gatekeeper/charts, name: gatekeeper }
+
+  # Issuers, the shared Gateway, and (on AWS) Karpenter node pools.
+  cluster-config:
+    enabled: true
+    wave: "0"
+    namespace: envoy-gateway-system
+    skipDryRun: true
+    # path is set per cluster: platform/cluster-config/<cluster>
+
+  policy-templates:
+    enabled: true
+    wave: "1"
+    namespace: gatekeeper-system
+    path: policies/templates
+
+  policy-constraints:
+    enabled: true
+    wave: "2"
+    namespace: gatekeeper-system
+    skipDryRun: true
+    path: policies/constraints
+
+tenants:
+  enabled: true
+  wave: "3"

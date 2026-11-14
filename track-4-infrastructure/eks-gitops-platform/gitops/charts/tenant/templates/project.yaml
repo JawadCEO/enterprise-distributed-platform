@@ -1,0 +1,35 @@
+# The tenant's ArgoCD project: its own repositories, its own namespace,
+# and no cluster-wide kinds (FR-18). Tenant groups can see only this
+# project in the ArgoCD UI (FR-29).
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: {{ .Values.name }}
+  namespace: argocd
+  labels:
+    {{- include "tenant.labels" . | nindent 4 }}
+spec:
+  description: Tenant {{ .Values.name }} ({{ .Values.owner }})
+  sourceRepos:
+    - {{ .Values.repoURL }}
+    {{- range .Values.sourceRepos }}
+    - {{ . }}
+    {{- end }}
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: {{ .Values.name }}
+  clusterResourceWhitelist: []
+  namespaceResourceBlacklist:
+    - { group: "", kind: ResourceQuota }
+    - { group: "", kind: LimitRange }
+    - { group: networking.k8s.io, kind: NetworkPolicy }
+    - { group: rbac.authorization.k8s.io, kind: Role }
+    - { group: rbac.authorization.k8s.io, kind: RoleBinding }
+  roles:
+    - name: viewer
+      description: Read-only view of this tenant's applications
+      policies:
+        - p, proj:{{ .Values.name }}:viewer, applications, get, {{ .Values.name }}/*, allow
+        - p, proj:{{ .Values.name }}:viewer, logs, get, {{ .Values.name }}/*, allow
+      groups:
+        {{- toYaml (default (list) .Values.groups) | nindent 8 }}

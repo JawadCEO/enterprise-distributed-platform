@@ -1,0 +1,9 @@
+# Demo tenant workload (podinfo). The tenant chart sets the namespace and
+# patches the HTTPRoute hostname to <app>-<tenant>.<appsDomain>.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - deployment.yaml
+  - service.yaml
+  - route.yaml
+  - external-secret.yaml

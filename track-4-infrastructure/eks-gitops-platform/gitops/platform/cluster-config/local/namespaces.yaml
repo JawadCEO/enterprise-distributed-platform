@@ -1,0 +1,10 @@
+# Exempt kube-system from Gatekeeper's fail-closed webhook (ADR-008).
+# ArgoCD only adds the label; it never deletes this namespace.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kube-system
+  labels:
+    admission.gatekeeper.sh/ignore: platform
+  annotations:
+    argocd.argoproj.io/sync-options: Delete=false,ServerSideApply=true

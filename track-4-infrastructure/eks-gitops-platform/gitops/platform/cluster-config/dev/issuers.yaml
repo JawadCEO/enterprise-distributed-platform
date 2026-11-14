@@ -1,0 +1,30 @@
+# Certificates without a domain (ADR-013): a self-signed root issues a platform CA, which signs
+# every Gateway certificate. Trust ca.crt from secret cert-manager/platform-ca
+# to avoid browser warnings.
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: selfsigned
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: platform-ca
+  namespace: cert-manager
+spec:
+  isCA: true
+  commonName: eks-gitops-dev-ca
+  secretName: platform-ca
+  duration: 8760h
+  privateKey: { algorithm: ECDSA, size: 256 }
+  issuerRef: { name: selfsigned, kind: ClusterIssuer }
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: platform
+spec:
+  ca:
+    secretName: platform-ca

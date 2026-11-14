@@ -1,0 +1,9 @@
+# Adds nodes for tenant load (FR-12, ADR-006). Runs on the managed
+# system node group; AWS access through EKS Pod Identity.
+serviceAccount:
+  name: karpenter
+replicas: 1
+controller:
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { memory: 512Mi }

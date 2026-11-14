@@ -1,0 +1,17 @@
+# FR-20. New constraints start as enforcementAction: warn and move to deny
+# by a later pull request (FR-21).
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sNoPrivileged
+metadata:
+  name: no-privileged
+spec:
+  enforcementAction: deny
+  match:
+    kinds:
+      - { apiGroups: [""], kinds: [Pod] }
+      - { apiGroups: [apps], kinds: [Deployment, StatefulSet, DaemonSet, ReplicaSet] }
+      - { apiGroups: [batch], kinds: [Job, CronJob] }
+    # Tenant namespaces only (ADR-008).
+    namespaceSelector:
+      matchExpressions:
+        - { key: platform/tenant, operator: Exists }

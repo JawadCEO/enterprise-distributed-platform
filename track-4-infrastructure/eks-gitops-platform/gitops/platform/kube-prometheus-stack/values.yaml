@@ -1,0 +1,20 @@
+# Cluster and per-tenant dashboards and alerts (FR-22, FR-23).
+# The platform's own alerts and dashboards are in platform/monitoring-config.
+grafana:
+  defaultDashboardsTimezone: utc
+  # The admin password comes from a secret, never from Git.
+  additionalDataSources:
+    - name: Loki
+      type: loki
+      url: http://loki.monitoring.svc:3100
+  sidecar:
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+prometheus:
+  prometheusSpec:
+    retention: 15d
+    # Pick up ServiceMonitors from every namespace, including tenants'.
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false

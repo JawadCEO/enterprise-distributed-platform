@@ -1,0 +1,29 @@
+# Admission policies (FR-20) with the failure mode chosen in ADR-008:
+# fail closed, but platform namespaces carry the
+# admission.gatekeeper.sh/ignore label and are skipped by the webhook,
+# so the platform can repair itself while Gatekeeper is down.
+replicas: 2
+validatingWebhookFailurePolicy: Fail
+validatingWebhookTimeoutSeconds: 3
+disableMutation: true
+podDisruptionBudget:
+  controllerManager:
+    minAvailable: 1
+controllerManager:
+  # Only these namespaces may carry the ignore label.
+  exemptNamespaces:
+    - argocd
+    - kube-system
+    - envoy-gateway-system
+    - cert-manager
+    - external-secrets
+    - external-dns
+    - karpenter
+    - monitoring
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 512Mi }
+audit:
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 512Mi }

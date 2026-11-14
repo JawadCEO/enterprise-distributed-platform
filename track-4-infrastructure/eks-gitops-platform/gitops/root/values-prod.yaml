@@ -1,0 +1,18 @@
+# EKS prod cluster. Change a version here only after it has run on dev (FR-9).
+cluster: prod
+awsAccountId: "000000000000"   # set once to the AWS account ID before the first AWS session
+appsDomain: apps.eks-gitops.internal   # no domain yet (ADR-013); reach apps with curl --resolve
+
+addons:
+  argocd:                       { chart: { version: "7.7.11" } }
+  envoy-gateway:                { chart: { version: "v1.2.4" } }
+  cert-manager:                 { chart: { version: "v1.16.2" } }
+  external-secrets:             { chart: { version: "0.12.1" } }
+  aws-load-balancer-controller: { enabled: true, chart: { version: "1.10.1" } }
+  karpenter:                    { enabled: true, chart: { version: "1.1.1" } }
+  external-dns:                 { enabled: false, chart: { version: "1.15.0" } }   # true once a domain exists (ADR-013)
+  kube-prometheus-stack:        { chart: { version: "66.3.1" } }
+  gatekeeper:                   { chart: { version: "3.18.0" } }
+  loki:                         { chart: { version: "6.24.0" } }
+  alloy:                        { chart: { version: "0.10.1" } }
+  cluster-config:               { path: platform/cluster-config/prod }

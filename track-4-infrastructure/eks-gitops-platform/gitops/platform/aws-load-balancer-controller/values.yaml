@@ -1,0 +1,9 @@
+# Creates the NLB in front of Envoy Gateway (ADR-005).
+# AWS access through EKS Pod Identity, association created by Terraform.
+serviceAccount:
+  name: aws-load-balancer-controller
+replicaCount: 1
+# Controller-created resources carry the same cost tags as Terraform's (FR-24).
+defaultTags:
+  project: eks-gitops-platform
+  owner: platform-team

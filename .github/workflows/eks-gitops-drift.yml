@@ -1,0 +1,61 @@
+# eks-gitops-platform: daily infrastructure drift check (FR-25, flow F11).
+# Read-only role; never applies. Skips environments that are torn down,
+# so an empty state between sessions is not reported as drift.
+name: eks-gitops drift
+
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+  issues: write
+
+jobs:
+  drift:
+    # Skipped until the AWS account is set up (aws-session runbook, step 6).
+    if: vars.EKS_GITOPS_ROLE_DRIFT != ''
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        environment: [dev, prod]
+    defaults:
+      run:
+        working-directory: track-4-infrastructure/eks-gitops-platform/terraform/envs/${{ matrix.environment }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with: { terraform_version: 1.10.5, terraform_wrapper: false }
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.EKS_GITOPS_ROLE_DRIFT }}
+          aws-region: us-east-1
+      - name: Check for drift
+        id: drift
+        run: |
+          terraform init -input=false -backend-config="bucket=${{ vars.EKS_GITOPS_STATE_BUCKET }}"
+          if [ "$(terraform state list | wc -l)" -eq 0 ]; then
+            echo "Environment is torn down; nothing to check"; echo "drift=none" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          set +e
+          terraform plan -input=false -no-color -detailed-exitcode -lock=false > plan.txt
+          code=$?
+          set -e
+          [ $code -eq 1 ] && { cat plan.txt; exit 1; }
+          [ $code -eq 2 ] && echo "drift=found" >> "$GITHUB_OUTPUT" || echo "drift=none" >> "$GITHUB_OUTPUT"
+      - name: Open an issue when drift is found
+        if: steps.drift.outputs.drift == 'found'
+        uses: actions/github-script@v7
+        env:
+          PLAN_FILE: track-4-infrastructure/eks-gitops-platform/terraform/envs/${{ matrix.environment }}/plan.txt
+        with:
+          script: |
+            const plan = require('fs').readFileSync(process.env.PLAN_FILE, 'utf8');
+            await github.rest.issues.create({
+              ...context.repo,
+              title: `Infrastructure drift in ${{ matrix.environment }}`,
+              body: "The scheduled plan found changes made outside Terraform.\n```\n" + plan.slice(-60000) + "\n```",
+            });

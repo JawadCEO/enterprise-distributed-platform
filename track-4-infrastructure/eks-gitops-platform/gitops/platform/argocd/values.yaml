@@ -1,0 +1,78 @@
+# Values for the argo-cd Helm chart, shared by every cluster.
+# Installed once by scripts/bootstrap.sh from this file; after that ArgoCD
+# manages itself through the "argocd" add-on in the root chart.
+
+global:
+  domain: argocd.localtest.me
+
+configs:
+  params:
+    # TLS is terminated at the Gateway, not by argocd-server.
+    server.insecure: true
+  cm:
+    # Poll Git every 3 minutes (NFR-4). A webhook cannot reach a private cluster.
+    timeout.reconciliation: 180s
+    # Sync waves between Applications only work if ArgoCD reports an
+    # Application's health. This check was removed from the defaults in 1.8.
+    resource.customizations.health.argoproj.io_Application: |
+      hs = {}
+      hs.status = "Progressing"
+      hs.message = ""
+      if obj.status ~= nil and obj.status.health ~= nil then
+        hs.status = obj.status.health.status
+        if obj.status.health.message ~= nil then
+          hs.message = obj.status.health.message
+        end
+      end
+      return hs
+    # Gatekeeper constraints report status on many objects; ignore the noise.
+    resource.exclusions: |
+      - apiGroups: ["status.gatekeeper.sh"]
+        kinds: ["*"]
+        clusters: ["*"]
+  rbac:
+    # Tenants get read-only access to their own project only (FR-29).
+    policy.default: ""
+    policy.csv: |
+      g, platform-admins, role:admin
+  repositories:
+    envoy-gateway:
+      type: helm
+      name: envoy-gateway
+      url: docker.io/envoyproxy
+      enableOCI: "true"
+    karpenter:
+      type: helm
+      name: karpenter
+      url: public.ecr.aws/karpenter
+      enableOCI: "true"
+
+controller:
+  # Metrics service for Prometheus (FR-23). Its ServiceMonitor lives in
+  # platform/monitoring-config, because the CRD does not exist at bootstrap.
+  metrics: { enabled: true }
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { memory: 768Mi }
+
+repoServer:
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 512Mi }
+
+server:
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits: { memory: 256Mi }
+
+applicationSet:
+  resources:
+    requests: { cpu: 25m, memory: 64Mi }
+    limits: { memory: 256Mi }
+
+dex:
+  enabled: false
+
+notifications:
+  enabled: false
+

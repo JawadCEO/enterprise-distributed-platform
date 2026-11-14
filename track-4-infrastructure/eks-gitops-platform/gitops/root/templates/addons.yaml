@@ -1,0 +1,72 @@
+{{- /*
+One Application per enabled add-on. Two kinds of add-on:
+  chart: an upstream Helm chart, with our values from platform/<name>/
+  path:  a directory of our own manifests in this repository
+The sync-wave annotation orders them (see docs/architecture/high-level-design.md).
+*/ -}}
+{{- $root := . }}
+{{- range $name, $a := .Values.addons }}
+{{- if $a.enabled }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: {{ $name }}
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: {{ $a.wave | quote }}
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+  labels:
+    platform/layer: addon
+spec:
+  project: default
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: {{ $a.namespace }}
+  {{- if $a.chart }}
+  sources:
+    - repoURL: {{ $a.chart.repo }}
+      chart: {{ $a.chart.name }}
+      targetRevision: {{ $a.chart.version | quote }}
+      helm:
+        releaseName: {{ $a.releaseName | default $name }}
+        ignoreMissingValueFiles: true
+        valueFiles:
+          - $values/{{ $root.Values.basePath }}/{{ $a.valuesDir | default (printf "platform/%s" $name) }}/values.yaml
+          - $values/{{ $root.Values.basePath }}/{{ $a.valuesDir | default (printf "platform/%s" $name) }}/values-{{ $root.Values.cluster }}.yaml
+    - repoURL: {{ $root.Values.repoURL }}
+      targetRevision: {{ $root.Values.targetRevision }}
+      ref: values
+  {{- else }}
+  source:
+    repoURL: {{ $root.Values.repoURL }}
+    targetRevision: {{ $root.Values.targetRevision }}
+    path: {{ $root.Values.basePath }}/{{ $a.path }}
+    directory:
+      recurse: true
+  {{- end }}
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    {{- with $a.managedNamespaceLabels }}
+    managedNamespaceMetadata:
+      labels:
+        {{- toYaml . | nindent 8 }}
+    {{- end }}
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+      {{- if $a.skipDryRun }}
+      - SkipDryRunOnMissingResource=true
+      {{- end }}
+    retry:
+      limit: 5
+      backoff: { duration: 10s, factor: 2, maxDuration: 3m }
+  {{- with $a.ignoreDifferences }}
+  ignoreDifferences:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+{{- end }}
+{{- end }}
