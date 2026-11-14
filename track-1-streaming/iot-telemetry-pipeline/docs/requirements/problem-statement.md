@@ -1,10 +1,10 @@
 # iot-telemetry-pipeline: Problem Statement
 
-**Status:** draft for review. Items marked **[assumption, Qn]** follow the recommended answer to open question n in [open-questions.md](open-questions.md) and change if that answer changes. How the platform works end to end, with examples, is in [how-it-works.md](how-it-works.md).
+**Status:** agreed. Items marked **[decided, Qn]** follow the answer to question n in [open-questions.md](open-questions.md) and change if that answer changes. How the platform works end to end, with examples, is in [how-it-works.md](how-it-works.md).
 
 ## 1. Context
 
-A mobile carrier runs an **IoT connectivity platform**, like Verizon ThingSpace. It provides cellular lines (SIMs) to business customers for their connected devices: a logistics company's asset trackers, a utility's smart meters, a cold-chain firm's fridge sensors. About **5 million lines** are active across many customers **[assumption, Q5]**.
+A mobile carrier runs an **IoT connectivity platform**, like Verizon ThingSpace. It provides cellular lines (SIMs) to business customers for their connected devices: a logistics company's asset trackers, a utility's smart meters, a cold-chain firm's fridge sensors. About **5 million lines** are active across many customers **[decided, Q5]**.
 
 Each line is a SIM in one of three forms: a **removable** card, an **embedded eSIM** soldered to the device's board, or an **integrated iSIM** built into the modem chip. The form matters: a soldered or integrated SIM can't move to another device, and its carrier profile is changed over the air instead of by swapping a card.
 
@@ -53,7 +53,7 @@ Each goal has a metric that a test or drill can check.
 | G5 | Exact usage | Each usage record is counted exactly once, verified by reconciling totals against the simulator's ledger after failure drills |
 | G6 | No loss | Zero acknowledged events or requests lost across broker, database and service-kill drills |
 | G7 | Isolation | A customer sending 10x its rate limit leaves other customers' latency within G1; one bad event delays later events on the same line by at most one retry hop |
-| G8 | Scale | 50,000 events/sec sustained for 10 minutes with flat consumer lag (design target; the laptop figure is measured and projected) **[assumption, Q5]** |
+| G8 | Scale | 50,000 events/sec sustained for 10 minutes with flat consumer lag (design target; the laptop figure is measured and projected) **[decided, Q5]** |
 
 ## 6. Non-goals
 
@@ -63,7 +63,7 @@ Each goal has a metric that a test or drill can check.
 - The real carrier network and SIM provisioning systems. They're simulated.
 - A user interface
 - Health or medical devices (a separate project, PulseLink)
-- Building the legacy polling system. The cut-over is documented, not built. **[assumption, Q4]**
+- Building the legacy polling system. The cut-over is documented, not built. **[decided, Q4]**
 
 ## 7. Constraints
 
@@ -72,7 +72,7 @@ Each goal has a metric that a test or drill can check.
 | All development and benchmarks run on a 16 GB laptop | Full-scale figures are design targets. Local results are reported as measured, with a projection. |
 | Stack: Java, Spring Boot, Kafka, PostgreSQL, Redis, Kubernetes, OpenTelemetry | Fixed for this project |
 | No carrier publishes network data | All traffic comes from `network-simulator`, with faults injected on purpose so every scenario repeats |
-| Multi-region can't run on one laptop | Designed fully, then simulated with two local clusters in Phase 6 **[assumption, Q6]** |
+| Multi-region can't run on one laptop | Designed fully, then simulated with two local clusters in Phase 6 **[decided, Q6]** |
 
 ## 8. The hard parts
 

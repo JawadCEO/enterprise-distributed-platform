@@ -112,7 +112,7 @@ Details (partition counts, message format, retention) are fixed in Phase 2.
 
 ## 7. Multi-region design
 
-Each region runs the full stack. Devices and the network reach the nearest healthy region. `network.events` is replicated in both directions, so both regions converge on the same state per line using the ADR-005 ordering rules, without replicating the database. Only a line's home region marks it offline and sends notifications, so customers don't get duplicate alerts. If a region fails, senders resend unacknowledged events to the survivor. Designed here, simulated locally in Phase 6 **[assumption, Q6]**.
+Each region runs the full stack. Devices and the network reach the nearest healthy region. `network.events` is replicated in both directions, so both regions converge on the same state per line using the ADR-005 ordering rules, without replicating the database. Only a line's home region marks it offline and sends notifications, so customers don't get duplicate alerts. If a region fails, senders resend unacknowledged events to the survivor. Designed here, simulated locally in Phase 6 **[decided, Q6]**.
 
 ## 8. Local memory budget
 

@@ -1,6 +1,6 @@
 # iot-telemetry-pipeline: Data and Flow
 
-**Status:** draft for review. Items marked **[assumption, Qn]** follow the recommended answer to open question n in [open-questions.md](open-questions.md); **[assumption]** marks sizing choices to confirm later. Example payloads and one tracker's day are in [real-time-data.md](real-time-data.md).
+**Status:** agreed. Items marked **[decided, Qn]** follow the answer to question n in [open-questions.md](open-questions.md); **[assumption]** marks sizing choices to confirm later. Example payloads and one tracker's day are in [real-time-data.md](real-time-data.md).
 
 ## 1. Flow at a glance
 
@@ -118,7 +118,7 @@ Each store serves one of the seven purposes in [how-it-works.md](how-it-works.md
 |---|---|---|---|
 | PostgreSQL `customer`, `line`, `webhook` | Registry: customer, line, SIM type, plan, keep-alive window, endpoints | All | While active |
 | PostgreSQL `line_state` + `device_state` | One row per line: line state, connection, last seen, battery, signal, firmware, IMEI, last `(bootId, sequence)` | 1. Current state | Always |
-| PostgreSQL `line_history` | State changes, attach/detach, requests, SIM moves (daily partitions) | 4. Support history | 90 days **[assumption, Q3]** |
+| PostgreSQL `line_history` | State changes, attach/detach, requests, SIM moves (daily partitions) | 4. Support history | 90 days **[decided, Q3]** |
 | PostgreSQL `usage_cycle` + `usage_record` | Running total per line per cycle; each usage record keyed by `eventId` | 3. Metering | 13 months |
 | PostgreSQL `request`, `job` | Every request and bulk job with its outcome | 2, 4 | 90 days |
 | PostgreSQL `notification` | Every webhook with delivery attempts | 2. Notifications | 30 days |
@@ -128,7 +128,7 @@ Each store serves one of the seven purposes in [how-it-works.md](how-it-works.md
 | Redis | Rate counters, duplicate keys (48 h), state cache, last-seen sorted set | Speed | Short-lived |
 | Kafka `network.events` | Every event as received | 7. Replay | 7 days |
 
-Keep-alives and routine status readings are **not** stored row by row: they only update current state and last seen. That's what keeps PostgreSQL to about 10M history rows a day instead of 1.3 billion **[assumption, Q3]**.
+Keep-alives and routine status readings are **not** stored row by row: they only update current state and last seen. That's what keeps PostgreSQL to about 10M history rows a day instead of 1.3 billion **[decided, Q3]**.
 
 ## 7. What we give back
 
@@ -155,7 +155,7 @@ Types: `REQUEST_COMPLETED`, `REQUEST_FAILED`, `DEVICE_ONLINE`, `DEVICE_OFFLINE`,
 
 ## 8. Volume
 
-At 5M lines **[assumption, Q5]**: ~15,000 events/s on average and ~50,000/s at peak (breakdown in [real-time-data.md](real-time-data.md#1-where-it-comes-from-and-how-fast)). About 1.3 billion events a day reach Kafka (~650 GB/day at 500 bytes); about 10 million history rows and a few hundred thousand notifications a day reach PostgreSQL.
+At 5M lines **[decided, Q5]**: ~15,000 events/s on average and ~50,000/s at peak (breakdown in [real-time-data.md](real-time-data.md#1-where-it-comes-from-and-how-fast)). About 1.3 billion events a day reach Kafka (~650 GB/day at 500 bytes); about 10 million history rows and a few hundred thousand notifications a day reach PostgreSQL.
 
 ## 9. Simulator
 

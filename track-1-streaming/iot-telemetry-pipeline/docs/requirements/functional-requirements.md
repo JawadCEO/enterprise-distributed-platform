@@ -1,6 +1,6 @@
 # iot-telemetry-pipeline: Functional Requirements
 
-**Status:** draft for review. Items marked **[assumption, Qn]** follow the recommended answer to open question n in [open-questions.md](open-questions.md). Items marked **[assumption]** are sizing choices to confirm in the low-level design. Flows A to E are described in [how-it-works.md](how-it-works.md).
+**Status:** agreed. Items marked **[decided, Qn]** follow the answer to question n in [open-questions.md](open-questions.md). Items marked **[assumption]** are sizing choices to confirm in the low-level design. Flows A to E are described in [how-it-works.md](how-it-works.md).
 
 Priority: **P0** is needed for the core story, **P1** for a complete project, **P2** only if time allows.
 
@@ -10,7 +10,7 @@ Priority: **P0** is needed for the core story, **P1** for a complete project, **
 |---|---|---|---|
 | FR-1 | Keep a registry of customers, lines and devices. Each line has an ICCID, a customer, a SIM type (`REMOVABLE`, `EMBEDDED`, `INTEGRATED`), a plan with a data allowance, a keep-alive window, and the IMEI of the device it was last seen in | P0 | Lines can be created in `INVENTORY`, looked up by ICCID, and listed per customer |
 | FR-2 | Keep a line state per line: `INVENTORY`, `PENDING`, `ACTIVE`, `SUSPENDED`, `DEACTIVATED`, changing only by the allowed transitions | P0 | The transition table in [data.md](data.md#5-state-models) is enforced; an attempt to break it is rejected and logged |
-| FR-3 | Manage customers and their rate limits **[assumption, Q1]** | P1 | A change to a customer's limit takes effect at the gateways within 60 s |
+| FR-3 | Manage customers and their rate limits **[decided, Q1]** | P1 | A change to a customer's limit takes effect at the gateways within 60 s |
 
 ## Customer requests (Flow A, Flow E)
 
@@ -41,7 +41,7 @@ Priority: **P0** is needed for the core story, **P1** for a complete project, **
 
 | ID | Requirement | Priority | Acceptance criteria |
 |---|---|---|---|
-| FR-19 | Mark a line offline on `DEVICE_DETACHED`, or when no event arrives within its keep-alive window plus 30 s grace **[assumption, Q2]** | P0 | The line goes `OFFLINE` with reason `DETACHED` or `KEEP_ALIVE_MISSED`; its next event brings it back `ONLINE` |
+| FR-19 | Mark a line offline on `DEVICE_DETACHED`, or when no event arrives within its keep-alive window plus 30 s grace **[decided, Q2]** | P0 | The line goes `OFFLINE` with reason `DETACHED` or `KEEP_ALIVE_MISSED`; its next event brings it back `ONLINE` |
 | FR-20 | Don't alert on expected silence | P0 | A line that is `SUSPENDED`, `DEACTIVATED`, or mid profile switch goes offline without a customer notification |
 | FR-21 | Outage guard: when a large share of lines in a region go silent together, send one outage notice per customer instead of one alert per line | P1 | A simulated region outage of 500,000 lines produces at most one outage notice per affected customer, and one recovery notice |
 
