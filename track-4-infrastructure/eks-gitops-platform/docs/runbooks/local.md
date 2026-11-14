@@ -7,12 +7,12 @@ Free, runs on the 16GB laptop, covers Phases 2, 3 and 6.
 | Tool | Tested version | Install (Windows, from an admin PowerShell) |
 |---|---|---|
 | Docker Desktop | 4.x | docker.com, then start it |
-| k3d | 5.7+ | `winget install k3d` |
+| k3d | 5.7+ (first run used 5.9.0) | `winget install k3d` |
 | kubectl | 1.31+ | ships with Docker Desktop |
-| Helm | 3.16+ | `winget install Helm.Helm` |
+| Helm | 3.16+ or 4.x (first run used 4.3.2) | `winget install Helm.Helm` |
 | gator | 3.18 | download `gator-v3.18.0-windows-amd64.tar.gz` from the Gatekeeper releases page |
 
-Run the scripts from Git Bash.
+Run the scripts from Git Bash (Start menu, "Git Bash"), not Command Prompt or PowerShell. In Git Bash, paths are written `/c/Preparation/...`.
 
 ## Bring it up
 

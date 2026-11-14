@@ -11,10 +11,14 @@ spec:
     metadata:
       labels: { app.kubernetes.io/name: good, owner: team-a }
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile: { type: RuntimeDefault }
       containers:
         - name: app
           image: ghcr.io/stefanprodan/podinfo:6.7.1
           resources:
             requests: { cpu: 50m, memory: 32Mi }
             limits: { memory: 128Mi }
-          securityContext: { allowPrivilegeEscalation: false }
+          securityContext: { allowPrivilegeEscalation: false, capabilities: { drop: [ALL] } }

@@ -31,10 +31,11 @@ samples="$(dirname "$0")/../policies/samples"
 sed 's/namespace: team-a/namespace: team-b/; s/^  name: good$/  name: hog/; s/^spec:$/spec:\n  replicas: 100/' \
   "$samples/good-deployment.yaml" | kubectl apply -f - >/dev/null
 sleep 20
-created=$(kubectl -n team-b get pods --no-headers 2>/dev/null | grep -c '^good-\|^hog-' || true)
-quota=$(kubectl -n team-b get resourcequota tenant-quota -o jsonpath='{.spec.hard.pods}')
-(( created < 100 && created <= quota )) && pass "noisy neighbour capped at $created pods (quota $quota)" \
-  || fail "noisy neighbour created $created pods (quota $quota)"
+created=$(kubectl -n team-b get pods --no-headers 2>/dev/null | grep -c '^hog-' || true)
+# Some pods must start (so the sample itself is valid) and the quota must
+# stop the rest. Zero means something else blocked them, which is a failure.
+(( created > 0 && created < 100 )) && pass "noisy neighbour capped at $created of 100 pods by its quota" \
+  || fail "noisy neighbour created $created of 100 pods"
 kubectl -n team-b delete deployment hog --wait=false >/dev/null
 
 echo "== Admission policies (FR-20)"

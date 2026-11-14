@@ -92,7 +92,7 @@ addons:
 
   gatekeeper:
     enabled: true
-    wave: "-1"
+    wave: "-3"   # up before other add-ons create namespaces (ADR-008)
     namespace: gatekeeper-system
     chart: { repo: https://open-policy-agent.github.io/gatekeeper/charts, name: gatekeeper }
 
