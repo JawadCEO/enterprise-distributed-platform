@@ -39,7 +39,8 @@ env:
 
 jobs:
   plan:
-    if: github.event_name == 'pull_request'
+    # Skipped until the AWS account is set up (aws-session runbook, step 6).
+    if: github.event_name == 'pull_request' && vars.EKS_GITOPS_ROLE_PLAN != ''
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -72,7 +73,7 @@ jobs:
             await github.rest.issues.createComment({ ...context.repo, issue_number: context.issue.number, body });
 
   apply:
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && vars.EKS_GITOPS_ROLE_APPLY != ''
     runs-on: ubuntu-latest
     environment: aws-${{ inputs.environment || 'dev' }}
     concurrency: eks-gitops-${{ inputs.environment || 'dev' }}

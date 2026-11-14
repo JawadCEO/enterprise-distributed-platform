@@ -15,6 +15,8 @@ permissions:
 
 jobs:
   drift:
+    # Skipped until the AWS account is set up (aws-session runbook, step 6).
+    if: vars.EKS_GITOPS_ROLE_DRIFT != ''
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
