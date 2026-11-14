@@ -43,7 +43,7 @@ Every session starts from nothing and ends with a full destroy (FR-26). The acco
 
 ## Recovery drill (FR-27, NFR-2)
 
-Two drills. Restore onto an empty cluster: run `scripts/recovery-drill.sh dev` on the access host; it wipes every add-on and tenant, bootstraps again, and records the time. Rebuild from nothing: destroy and recreate as above, adding the apply and bootstrap times. With a domain, drills use the Let's Encrypt staging issuer, and production only for the final measured run.
+Destroy and recreate the environment as above. Right after the apply, run `scripts/recovery-drill.sh dev` on the access host instead of `bootstrap.sh`: it refuses to run on a cluster that already has ArgoCD, then times the restore from Git. The rebuild-from-nothing time is the apply time plus that number. With a domain, drills use the Let's Encrypt staging issuer, and production only for the final measured run.
 
 ## Reaching a tenant app without a domain
 
