@@ -7,8 +7,10 @@ metadata:
   namespace: argocd
   labels:
     {{- include "tenant.labels" $ | nindent 4 }}
-  finalizers:
-    - resources-finalizer.argocd.argoproj.io
+  # No resources finalizer: everything this app creates lives in the tenant
+  # namespace, which the tenant chart deletes. A finalizer would wait on the
+  # tenant's AppProject, which is deleted at the same time, and hang
+  # offboarding (found by the first recovery drill).
 spec:
   project: {{ $.Values.name }}
   source:

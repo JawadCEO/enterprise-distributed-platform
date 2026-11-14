@@ -1,26 +1,42 @@
 #!/usr/bin/env bash
-# Recovery drill (FR-27, NFR-2): wipes everything ArgoCD installed, leaving
-# an empty cluster, then restores it from Git and times the restore.
-# Run against the local cluster, or on the access host for dev.
+# Recovery drill (FR-27, NFR-2): starts from a fresh, empty cluster and times
+# the restore from Git, from "cluster ready" to every Application Synced and
+# Healthy and the tenant app answering over HTTPS.
 #
-#   scripts/recovery-drill.sh <local|dev|prod>
+#   scripts/recovery-drill.sh local   deletes and recreates the k3d cluster
+#   scripts/recovery-drill.sh dev     run on the access host right after
+#                                     Terraform has recreated the cluster
+#
+# It never wipes a live cluster piece by piece: deleting add-ons and tenants
+# in place is slower and less realistic than a new cluster, and the first
+# drill showed it can hang on deletion order.
 set -euo pipefail
 
 cluster="${1:?usage: recovery-drill.sh <local|dev|prod>}"
 here="$(cd "$(dirname "$0")/.." && pwd)"
-context="$(kubectl config current-context)"
-read -r -p "This deletes every platform add-on and tenant on '$context'. Type the cluster name to continue: " answer
-[[ "$answer" == "$cluster" ]] || { echo "aborted"; exit 1; }
 
-echo "Wiping: deleting the root Application and everything under it"
-kubectl -n argocd delete application root --wait=true --timeout=15m || true
-kubectl -n argocd delete applications.argoproj.io --all --wait=true --timeout=10m || true
-helm -n argocd uninstall argocd --wait || true
-kubectl delete namespace argocd --wait=true --timeout=5m || true
-echo "Cluster is empty of platform components"
+if [[ "$cluster" == local ]]; then
+  read -r -p "This deletes the local k3d cluster 'eks-gitops'. Type local to continue: " answer
+  [[ "$answer" == local ]] || { echo "aborted"; exit 1; }
+  k3d cluster delete eks-gitops
+  k3d cluster create --config "$here/gitops/bootstrap/local/k3d.yaml" --wait
+  kubectl config use-context k3d-eks-gitops
+  host="podinfo-team-a.localtest.me"; port=8443
+else
+  # On AWS the cluster must be new and empty: Terraform recreated it.
+  if kubectl get namespace argocd >/dev/null 2>&1; then
+    echo "argocd already exists: run this on a freshly created cluster" >&2; exit 1
+  fi
+  host=""; port=443
+fi
 
+echo "Cluster ready. Restoring from Git"
 start=$(date +%s)
 "$here/scripts/bootstrap.sh" "$cluster"
+
+if [[ -n "$host" ]]; then
+  until curl -sk -o /dev/null -w '%{http_code}' "https://$host:$port/" | grep -q 200; do sleep 5; done
+fi
 elapsed=$(( $(date +%s) - start ))
 
 echo

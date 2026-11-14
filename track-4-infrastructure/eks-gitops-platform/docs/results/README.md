@@ -7,7 +7,7 @@
 | Target | Requirement | How measured | Local | AWS |
 |---|---|---|---|---|
 | Provisioning < 15 min | NFR-1, G2 | `eks-gitops terraform` apply job summary (time per stage) plus `scripts/bootstrap.sh` time; 3 runs | n/a | not run |
-| Recovery < 10 min | NFR-2, G3 | `scripts/recovery-drill.sh` | not run | not run |
+| Recovery < 10 min | NFR-2, G3 | `scripts/recovery-drill.sh` | **424 s** (7 min 4 s): new k3d cluster to 17 apps healthy and the tenant app answering | not run |
 | Change lead time < 5 min | NFR-4 | Merge time to new version running | not run | not run |
 | Cluster drift reverted < 5 min | NFR-5 | `tests/tenancy/run.sh` drift check | **5–7 s** (2 runs) | not run |
 | Infrastructure drift reported < 24 h | NFR-5 | `eks-gitops drift` workflow after a console change | n/a | not run |
@@ -26,7 +26,7 @@
 | Drill | Result |
 |---|---|
 | Destroy and rebuild from nothing | not run |
-| Restore onto an empty cluster | not run |
+| Restore onto an empty cluster | Local: 424 s, no manual step (2026-11-14) |
 | Add-on upgrade, dev then prod promotion | not run |
 | Kubernetes minor-version upgrade | not run |
 | Bad sync rolled back by revert | not run |
@@ -75,4 +75,6 @@ Bugs found and fixed by this run:
 | Both tenants failed to sync | The owner email was used as a label value, which is invalid | Owner moved to an annotation |
 | Quota test passed while no pod could start | The test pod broke the restricted Pod Security Standard, so 0 pods looked like "capped" | Test sample made compliant; zero now fails the test |
 
-Not run yet locally: the recovery drill (it bootstraps from `main`, so it waits until these fixes are merged), forcing each alert, and the change lead time.
+Recovery drill (after the fixes were merged): a new k3d cluster restored from `main` in **424 s** with no manual step. The first attempt wiped the running cluster in place and hung for 20 minutes: each tenant's ArgoCD project was deleted before its apps, whose finalizer then waited on it forever. Fixed by dropping that finalizer from tenant apps (their namespace removes everything) and by making the drill always start from a new cluster, which is what NFR-2 measures.
+
+Not run yet locally: forcing each alert, and the change lead time.
